@@ -146,7 +146,9 @@ ${notes.map((n, i) => `${i + 1}. ${n}`).join('\n') || 'None'}
         <small className="text-muted d-block mt-1">
           {customPrompt.trim() 
             ? "Mode: Custom prompt -> 5-line focused response" 
-            : "Mode: Default -> 7-line report (3-line summary of usert.txt + 4-line task guidance)"}
+            : tasks.length === 0 && notes.length === 0
+              ? "Mode: Empty Workspace -> 8-line App Onboarding & Study Guide"
+              : "Mode: Default -> 7-line report (3-line summary of usert.txt + 4-line task guidance)"}
         </small>
       </div>
 
@@ -170,7 +172,11 @@ ${notes.map((n, i) => `${i + 1}. ${n}`).join('\n') || 'None'}
         <div className="report-container bg-white p-4 rounded-xl border shadow-sm">
           <div className="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom">
             <h5 className="mb-0 fw-bold text-dark">
-              {reportData.isCustomPrompt ? "Custom AI Answer (5 Lines)" : "RAG Report & Task Guidance (7 Lines)"}
+              {reportData.isCustomPrompt 
+                ? "Custom AI Answer (5 Lines)" 
+                : reportData.totalItems === 0 && !reportData.hasPdf
+                  ? "App Onboarding & Study Guide (8 Lines)"
+                  : "RAG Report & Task Guidance (7 Lines)"}
             </h5>
             <div>
               <span className="badge bg-secondary me-2">Items: {reportData.totalItems}</span>

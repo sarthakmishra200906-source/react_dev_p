@@ -108,9 +108,10 @@ class Project1RAG:
                 "2. 📌 Step 1: Add your active study tasks in the 'Enter your task' section above.\n"
                 "3. 📝 Step 2: Log key notes, deadlines, or strategies in the 'Enter your note' field.\n"
                 "4. 📄 Step 3: (Optional) Attach handwritten notes or exam PDFs for multi-modal context.\n"
-                "5. 💡 Step 4: Click 'Generate AI Report' for a custom 7-line study plan based on your context.\n"
+                "5. 💡 Step 4: Click 'Generate AI Report' for a custom study plan based on your context.\n"
                 "6. ❓ Custom Query Tip: Type a question in the query box to get a focused 5-line answer.\n"
-                "7. 🎯 Action Tip: Clear your session anytime using the 'Clear' button to start fresh context."
+                "7. 🎯 Action Tip: Clear your session anytime using the 'Clear' button to start fresh context.\n"
+                "8. 😜 Quick Tip: \"Gotcha! I see your hands are itching to test things out ('Kuchukundia Budhi' style)—go ahead and add a task above to generate a full report!\""
             )
 
         # 2. Advanced Semantic & Atomic Chunking
@@ -556,9 +557,10 @@ class Project1RAG:
                     "2. 📌 Step 1: Add your active study tasks in the 'Enter your task' section above.\n"
                     "3. 📝 Step 2: Log key notes, deadlines, or strategies in the 'Enter your note' field.\n"
                     "4. 📄 Step 3: (Optional) Attach handwritten notes or exam PDFs for multi-modal context.\n"
-                    "5. 💡 Step 4: Click 'Generate AI Report' for a custom 7-line study plan based on your context.\n"
+                    "5. 💡 Step 4: Click 'Generate AI Report' for a custom study plan based on your context.\n"
                     "6. ❓ Custom Query Tip: Type a question in the query box to get a focused 5-line answer.\n"
-                    "7. 🎯 Action Tip: Clear your session anytime using the 'Clear' button to start fresh context."
+                    "7. 🎯 Action Tip: Clear your session anytime using the 'Clear' button to start fresh context.\n"
+                    "8. 😜 Quick Tip: \"Gotcha! I see your hands are itching to test things out ('Kuchukundia Budhi' style)—go ahead and add a task above to generate a full report!\""
                 )
             else:
                 return (
