@@ -54,14 +54,11 @@ class Project1RAG:
         )
         self.gemini_api_key = raw_key.strip("[]'\"") if raw_key else None
         self.gemini_models = [
-            "gemini-flash-latest",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-flash-lite-latest",
-            "gemini-3.8-flash",
-            "gemini-3.7-flash",
             "gemini-3.6-flash",
+            "gemini-3.8-flash",
             "gemini-3.5-flash",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
             "gemini-pro-latest",
         ]
 
@@ -252,20 +249,46 @@ class Project1RAG:
 
     def _clean_and_enforce_lines(self, raw_text: str, target_lines: int) -> str:
         """Cleans and strictly formats the response to have exactly target_lines without cutting lines in half."""
-        cleaned_lines = []
+        # 1. Group lines by numbered bullets to avoid breaking wrapped sentences in half
+        grouped_items = []
+        current_item = []
+
         for line in raw_text.splitlines():
             line_str = line.strip()
+            if not line_str:
+                continue
+            # Remove markdown asterisks/headers
             line_str = re.sub(r"^(#+|\*\*|\*)\s*", "", line_str)
             line_str = re.sub(r"(\*\*|\*)$", "", line_str).strip()
-            line_without_num = re.sub(r"^\d+[\.\)\-]\s*", "", line_str).strip()
-            if not line_without_num:
+
+            # Check if this line starts a new numbered item (e.g., '1.', '1)', '1 -', or bullet)
+            num_match = re.match(r"^(\d+[\.\)\-]|[-*•])\s*(.*)", line_str)
+            if num_match:
+                if current_item:
+                    grouped_items.append(" ".join(current_item).strip())
+                content = num_match.group(2).strip()
+                current_item = [content] if content else []
+            else:
+                # Continuation of current item
+                if current_item:
+                    current_item.append(line_str)
+                else:
+                    current_item.append(line_str)
+
+        if current_item:
+            grouped_items.append(" ".join(current_item).strip())
+
+        cleaned_lines = []
+        for item in grouped_items:
+            # Strip conversational preamble
+            item_clean = re.sub(r"^(here (is|are)|sure,|certainly|below is|response:|guidance:)\s*", "", item, flags=re.I).strip()
+            # Strip residual leading numbering
+            item_clean = re.sub(r"^\d+[\.\)\-]\s*", "", item_clean).strip()
+            if not item_clean:
                 continue
-            if re.match(r"^(here (is|are)|sure,|certainly|below is|response:|guidance:)", line_without_num, re.I):
+            if len(item_clean) < 10 and item_clean.endswith((".", ":", ",")):
                 continue
-            # Avoid fragments that are too short to be complete sentences
-            if len(line_without_num) < 15 and line_without_num.endswith((".", ":", ",")):
-                continue
-            cleaned_lines.append(line_without_num)
+            cleaned_lines.append(item_clean)
 
         final_lines = []
         for idx, line in enumerate(cleaned_lines[:target_lines], 1):
@@ -307,26 +330,34 @@ class Project1RAG:
         """
         context_str = "\n\n---\n\n".join(chunks) if chunks else "No specific documents provided."
         target_lines = 5 if is_custom_instruction else 7
+        has_pdf = bool(pdf_bytes and len(pdf_bytes) > 0)
 
         if not is_custom_instruction:
+            pdf_guidance = (
+                "Line 3: Comprehensive analysis of the attached handwritten/scanned PDF document: thoroughly read and visually transcribe its key topics, definitions, diagrams, and questions.\n"
+                if has_pdf else
+                "Line 3: Overview of attached documents and overall workspace status (confirming synchronization with usert.txt).\n"
+            )
             system_instruction = (
-                "You are an expert AI assistant that analyzes user tasks, notes, and attached documents from usert.txt.\n"
+                "You are an expert AI academic and task management assistant analyzing user tasks, notes, and attached documents from usert.txt.\n"
+                + ("CRITICAL MULTIMODAL INSTRUCTION: An attached PDF is provided containing handwritten study notes, scanned sheets, or exam questions. You MUST visually read, transcribe, and synthesize every handwritten note, formula, and diagram across the pages of this PDF.\n" if has_pdf else "") +
                 "STRICT FORMATTING RULE: You MUST output EXACTLY 7 LINES (no markdown headers, no preamble, numbered 1 to 7):\n"
                 "Line 1: Summary of user's active tasks directly naming their tasks.\n"
                 "Line 2: Summary of user's notes and key details directly quoting/referencing their notes.\n"
-                "Line 3: Overview of attached documents and overall workspace status.\n"
-                "Line 4: Step 1 concrete guidance to complete the most important task.\n"
-                "Line 5: Step 2 guidance taking direct reference from the user's specific notes.\n"
-                "Line 6: Guidance on handling prerequisites or workflow dependencies.\n"
-                "Line 7: Final actionable tip to finish all pending items on schedule.\n"
-                "CRITICAL COMPLETION RULE: Each numbered line MUST be a complete, self-contained sentence without being cut in half."
+                f"{pdf_guidance}"
+                "Line 4: Step 1 concrete guidance to complete the most important task, directly synthesizing core concepts from the notes/PDF.\n"
+                "Line 5: Step 2 guidance taking direct reference from the user's specific notes and handwritten materials.\n"
+                "Line 6: Guidance on handling prerequisites or workflow dependencies between the modules.\n"
+                "Line 7: Final actionable tip to finish all pending items on schedule and achieve maximum exam marks.\n"
+                "CRITICAL COMPLETION RULE: Each numbered line MUST be a single, complete, full sentence without being cut in half. Never truncate or wrap lines."
             )
-            user_instruction = "Generate the 7-line analysis and task completion guidance now based on the retrieved context."
+            user_instruction = "Generate the 7-line analysis and task completion guidance now based on the retrieved context and attached document."
         else:
             system_instruction = (
-                "You are an expert AI assistant analyzing the user's tasks, notes, and documents.\n"
+                "You are an expert AI academic assistant analyzing the user's tasks, notes, and documents.\n"
+                + ("CRITICAL MULTIMODAL INSTRUCTION: An attached PDF is provided containing handwritten notes, exam questions, or scanned pages. You MUST visually read, transcribe, and utilize its contents to provide an accurate, high-quality answer.\n" if has_pdf else "") +
                 "STRICT FORMATTING RULE: The user provided a custom prompt. You MUST output EXACTLY 5 LINES (numbered 1 to 5):\n"
-                "Line 1 to Line 5: Provide a clear, highly actionable 5-line response directly answering the user prompt using their specific tasks and notes.\n"
+                "Line 1 to Line 5: Provide a clear, highly actionable 5-line response directly answering the user prompt using their specific tasks, notes, and attached document contents.\n"
                 "CRITICAL COMPLETION RULE: Each numbered line MUST be a complete, self-contained sentence without being cut in half. Do NOT include markdown titles, extra blank lines, or preamble."
             )
             user_instruction = f"User Custom Prompt: {raw_prompt}\nAnswer in exactly 5 lines:"
@@ -424,8 +455,8 @@ class Project1RAG:
             try:
                 b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
                 parts.append({
-                    "inline_data": {
-                        "mime_type": "application/pdf",
+                    "inlineData": {
+                        "mimeType": "application/pdf",
                         "data": b64_pdf,
                     }
                 })

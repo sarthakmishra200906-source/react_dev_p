@@ -55,10 +55,20 @@ ${notes.map((n, i) => `${i + 1}. ${n}`).join('\n') || 'None'}
     }
 
     try {
-      const response = await fetch(getApiUrl('/api/generate-report'), {
-        method: 'POST',
-        body: formData,
-      });
+      let response;
+      try {
+        response = await fetch('/api/generate-report', {
+          method: 'POST',
+          body: formData,
+        });
+      } catch (err) {
+        // Fallback directly to current host port 8000
+        const host = window.location.hostname || 'localhost';
+        response = await fetch(`http://${host}:8000/api/generate-report`, {
+          method: 'POST',
+          body: formData,
+        });
+      }
 
       if (!response.ok) {
         throw new Error(`Server returned status ${response.status}`);
@@ -84,7 +94,7 @@ ${notes.map((n, i) => `${i + 1}. ${n}`).join('\n') || 'None'}
     } catch (error) {
       console.error("RAG Pipeline error:", error);
       setReportData({
-        summary: "Error connecting to local RAG server on port 8000.\n\nPlease check that the backend is running:\ncd project-1/backend\nuvicorn main:app --reload --port 8000",
+        summary: "Error connecting to RAG backend server on port 8000.\n\nPlease start the backend to listen on all WiFi interfaces:\ncd project-1/backend\npython -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
         totalItems: tasks.length + notes.length,
         hasPdf: !!pdfFile,
         generatedAt: new Date().toLocaleTimeString(),
