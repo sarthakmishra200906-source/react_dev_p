@@ -1,1 +1,15 @@
 @import "tailwindcss";
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background-color: #ffffff !important;
+  color: #212529 !important;
+}
+
+.collapse {
+  visibility: visible;
+}
