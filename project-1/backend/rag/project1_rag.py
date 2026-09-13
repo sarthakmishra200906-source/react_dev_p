@@ -10,6 +10,7 @@ Unified RAG Module (Project1RAG):
 - LLM Execution & Fallback: Local Ollama (llama3) -> Google Gemini API -> Offline Diagnostic Report
 """
 
+import base64
 import io
 import json
 import os
@@ -53,15 +54,15 @@ class Project1RAG:
         )
         self.gemini_api_key = raw_key.strip("[]'\"") if raw_key else None
         self.gemini_models = [
+            "gemini-flash-latest",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-flash-lite-latest",
             "gemini-3.8-flash",
             "gemini-3.7-flash",
             "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-flash-latest",
-            "gemini-flash-lite-latest",
             "gemini-pro-latest",
-            "gemini-2.5-flash-lite",
-            "gemini-3.1-flash-lite",
         ]
 
     def run(
@@ -129,6 +130,7 @@ class Project1RAG:
             chunks=relevant_chunks,
             is_custom_instruction=is_custom_instruction,
             raw_prompt=prompt,
+            pdf_bytes=pdf_bytes,
         )
         return response
 
@@ -159,7 +161,7 @@ class Project1RAG:
 
         if extracted_pages:
             return "=== EXTRACTED PDF DOCUMENT CONTENT ===\n" + "\n\n".join(extracted_pages)
-        return "=== EXTRACTED PDF DOCUMENT CONTENT ===\n[PDF document attached, but no text was extractable.]"
+        return "=== ATTACHED PDF DOCUMENT ===\n[Attached handwritten notes or scanned document. Multimodal visual document comprehension active.]"
 
     def _chunk_context(self, text: str, max_chunk_size: int = 400, overlap: int = 60) -> List[str]:
         """
@@ -249,7 +251,7 @@ class Project1RAG:
         return [chunk for score, chunk in scored_chunks[:top_k]]
 
     def _clean_and_enforce_lines(self, raw_text: str, target_lines: int) -> str:
-        """Cleans and strictly formats the response to have exactly target_lines without empty items."""
+        """Cleans and strictly formats the response to have exactly target_lines without cutting lines in half."""
         cleaned_lines = []
         for line in raw_text.splitlines():
             line_str = line.strip()
@@ -258,24 +260,18 @@ class Project1RAG:
             line_without_num = re.sub(r"^\d+[\.\)\-]\s*", "", line_str).strip()
             if not line_without_num:
                 continue
-            if re.match(r"^(here (is|are)|sure,|certainly|below is|response:)", line_without_num, re.I):
+            if re.match(r"^(here (is|are)|sure,|certainly|below is|response:|guidance:)", line_without_num, re.I):
+                continue
+            # Avoid fragments that are too short to be complete sentences
+            if len(line_without_num) < 15 and line_without_num.endswith((".", ":", ",")):
                 continue
             cleaned_lines.append(line_without_num)
 
-        # If too few lines, split larger sentences to reach line count
-        if len(cleaned_lines) < target_lines:
-            expanded = []
-            for item in cleaned_lines:
-                sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", item) if s.strip()]
-                for s in sentences:
-                    s_clean = re.sub(r"^\d+[\.\)\-]\s*", "", s).strip()
-                    if s_clean:
-                        expanded.append(s_clean)
-            if len(expanded) > len(cleaned_lines):
-                cleaned_lines = expanded
-
         final_lines = []
         for idx, line in enumerate(cleaned_lines[:target_lines], 1):
+            # Ensure line finishes cleanly with a period if not ending with standard punctuation
+            if not line.endswith((".", "!", "?", "\"", "'")):
+                line = line + "."
             final_lines.append(f"{idx}. {line}")
 
         fallback_pool = [
@@ -300,16 +296,14 @@ class Project1RAG:
         chunks: List[str],
         is_custom_instruction: bool,
         raw_prompt: str,
+        pdf_bytes: Optional[bytes] = None,
     ) -> str:
         """
         Multi-Tier Cascading Fallback Architecture:
-        1. Cloud LLM Cascade: Iterates through Gemini models (gemini-3.8-flash, etc.).
-           If one fails, the next takes over immediately.
-        2. Local Ollama Control: If cloud models/network fail, local Ollama takes control
-           to generate responses using locally available model.
+        1. Cloud LLM Cascade: Iterates through Gemini models with Multimodal vision for handwritten/scanned PDFs.
+        2. Local Ollama Control: If cloud models/network fail, local Ollama takes control.
         3. Dynamic Semantic Synthesizer: If all LLMs are unreachable, dynamically extracts
-           the user's real tasks, notes, and query to generate an intelligent personalized answer
-           (never generic boilerplate), respecting the 7-line / 5-line protocol.
+           the user's real tasks, notes, and query to generate an intelligent personalized answer.
         """
         context_str = "\n\n---\n\n".join(chunks) if chunks else "No specific documents provided."
         target_lines = 5 if is_custom_instruction else 7
@@ -324,7 +318,8 @@ class Project1RAG:
                 "Line 4: Step 1 concrete guidance to complete the most important task.\n"
                 "Line 5: Step 2 guidance taking direct reference from the user's specific notes.\n"
                 "Line 6: Guidance on handling prerequisites or workflow dependencies.\n"
-                "Line 7: Final actionable tip to finish all pending items on schedule."
+                "Line 7: Final actionable tip to finish all pending items on schedule.\n"
+                "CRITICAL COMPLETION RULE: Each numbered line MUST be a complete, self-contained sentence without being cut in half."
             )
             user_instruction = "Generate the 7-line analysis and task completion guidance now based on the retrieved context."
         else:
@@ -332,7 +327,7 @@ class Project1RAG:
                 "You are an expert AI assistant analyzing the user's tasks, notes, and documents.\n"
                 "STRICT FORMATTING RULE: The user provided a custom prompt. You MUST output EXACTLY 5 LINES (numbered 1 to 5):\n"
                 "Line 1 to Line 5: Provide a clear, highly actionable 5-line response directly answering the user prompt using their specific tasks and notes.\n"
-                "Do NOT include markdown titles, extra blank lines, or preamble."
+                "CRITICAL COMPLETION RULE: Each numbered line MUST be a complete, self-contained sentence without being cut in half. Do NOT include markdown titles, extra blank lines, or preamble."
             )
             user_instruction = f"User Custom Prompt: {raw_prompt}\nAnswer in exactly 5 lines:"
 
@@ -349,7 +344,7 @@ class Project1RAG:
         if self.gemini_api_key and self.gemini_api_key != "your_gemini_api_key_here":
             for model_name in self.gemini_models:
                 try:
-                    gemini_res = self._call_gemini_api(model_name, full_prompt)
+                    gemini_res = self._call_gemini_api(model_name, full_prompt, pdf_bytes=pdf_bytes)
                     if gemini_res:
                         formatted = self._clean_and_enforce_lines(gemini_res, target_lines)
                         if formatted:
@@ -420,12 +415,27 @@ class Project1RAG:
             return None
         return None
 
-    def _call_gemini_api(self, model: str, prompt: str) -> Optional[str]:
-        """Calls Gemini REST API via standard library with timeout protection."""
-        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.gemini_api_key}"
+    def _call_gemini_api(self, model: str, prompt: str, pdf_bytes: Optional[bytes] = None) -> Optional[str]:
+        """Calls Gemini REST API via standard library with timeout protection and multimodal PDF vision support."""
+        clean_model = model.replace("models/", "")
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{clean_model}:generateContent?key={self.gemini_api_key}"
+        parts = []
+        if pdf_bytes and len(pdf_bytes) > 0 and len(pdf_bytes) < 18 * 1024 * 1024:
+            try:
+                b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+                parts.append({
+                    "inline_data": {
+                        "mime_type": "application/pdf",
+                        "data": b64_pdf,
+                    }
+                })
+            except Exception:
+                pass
+        parts.append({"text": prompt})
+
         payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 1024},
+            "contents": [{"parts": parts}],
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048},
         }
 
         try:
@@ -435,14 +445,14 @@ class Project1RAG:
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=8) as response:
+            with urllib.request.urlopen(req, timeout=25) as response:
                 if response.status == 200:
                     data = json.loads(response.read().decode("utf-8"))
                     candidates = data.get("candidates", [])
                     if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts:
-                            return parts[0].get("text", "").strip()
+                        parts_resp = candidates[0].get("content", {}).get("parts", [])
+                        if parts_resp:
+                            return parts_resp[0].get("text", "").strip()
         except urllib.error.HTTPError as e:
             if e.code in (400, 403):
                 raise PermissionError("INVALID_GEMINI_KEY")

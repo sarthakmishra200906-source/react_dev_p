@@ -7,10 +7,9 @@ export default function Report({ tasks = [], notes = [] }) {
   const [customPrompt, setCustomPrompt] = useState('');
   const [chatHistory, setChatHistory] = useState([]);
 
-  // Compute dynamic API Base URL (works on localhost AND network IP like 192.168.x.x)
+  // Compute dynamic API endpoint (routes through Vite proxy on localhost and any WiFi device)
   const getApiUrl = (endpoint) => {
-    const host = window.location.hostname || 'localhost';
-    return `http://${host}:8000${endpoint}`;
+    return endpoint;
   };
 
   // On initial mount / page refresh: clear backend docs to save space
