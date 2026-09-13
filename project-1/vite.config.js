@@ -6,8 +6,17 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    host: true,
+    host: true, // Listen on 0.0.0.0 for localhost and hosted/network IP
     port: 5173,
+    watch: {
+      ignored: [
+        '**/backend/**',
+        '**/backend/docs/**',
+        '**/docs/**',
+        '**/*.txt',
+        '**/*.pdf',
+        '**/.env*',
+      ],
+    },
   },
 })
-
