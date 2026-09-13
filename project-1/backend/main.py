@@ -418,6 +418,7 @@ async def upload_resource(
             "id": item_id,
             "title": item_title,
             "type": resource_type,
+            "file_path": str(file_path) if file else "",
             "url": url.strip() if resource_type == "link" else "",
             "preview": extracted_text[:300],
             "text": extracted_text[:15000],
@@ -440,13 +441,48 @@ async def upload_resource(
 
 @app.delete("/api/resources/{resource_id}")
 async def delete_resource(resource_id: str):
-    """Deletes a resource from the library."""
-    global resources_store
+    """
+    Deletes a resource from the in-memory library and actively purges
+    corresponding physical disk files from backend/docs/ to prevent ghost file buildup.
+    """
+    global resources_store, pdf_session_cache
+    target_res = next((r for r in resources_store if r.get("id") == resource_id), None)
+
+    # 1. Actively remove physical files from backend/docs/
+    deleted_files = []
+    try:
+        if target_res and target_res.get("file_path"):
+            recorded_p = Path(target_res["file_path"])
+            if recorded_p.exists() and recorded_p.is_file():
+                recorded_p.unlink(missing_ok=True)
+                deleted_files.append(recorded_p.name)
+
+        # Catch any file starting with resource_id in DOCS_DIR
+        for disk_file in DOCS_DIR.glob(f"{resource_id}*"):
+            if disk_file.is_file():
+                disk_file.unlink(missing_ok=True)
+                deleted_files.append(disk_file.name)
+    except Exception as e:
+        print(f"[Cleanup Warning] Error deleting disk file for resource {resource_id}: {e}")
+
+    # 2. Clear active in-memory PDF cache if matching
+    if target_res and target_res.get("title") and target_res["title"] == pdf_session_cache.get("filename"):
+        pdf_session_cache["text"] = ""
+        pdf_session_cache["filename"] = ""
+        pdf_session_cache["updated_at"] = ""
+
+    # 3. Remove from memory store
     initial_len = len(resources_store)
     resources_store = [r for r in resources_store if r.get("id") != resource_id]
-    if len(resources_store) == initial_len:
+    if len(resources_store) == initial_len and not deleted_files:
         raise HTTPException(status_code=404, detail="Resource not found.")
-    return {"status": "success", "message": "Resource deleted.", "remaining": len(resources_store)}
+
+    return {
+        "status": "success",
+        "message": f"Resource deleted and {len(deleted_files)} disk file(s) permanently purged from backend/docs/.",
+        "deleted_disk_files": deleted_files,
+        "remaining": len(resources_store),
+    }
 
 
 @app.post("/api/research")

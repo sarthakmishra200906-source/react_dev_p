@@ -186,6 +186,10 @@ export default function App() {
 
   const handleDeleteResource = (resourceId) => {
     setResources((prev) => prev.filter((r) => r.id !== resourceId));
+    // Trigger backend physical disk cleanup
+    fetch(`/api/resources/${resourceId}`, { method: 'DELETE' }).catch((err) =>
+      console.warn('Backend resource delete error:', err)
+    );
   };
 
   // Dashboard Feature Metadata for indicator & switcher
