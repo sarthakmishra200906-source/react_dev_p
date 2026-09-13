@@ -6,7 +6,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -357,6 +357,178 @@ async def document_chat(
             "has_document": bool(cached_text),
             "doc_name": pdf_session_cache["filename"],
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- MULTI-RESOURCE HUB (Up to 50 Items) & DEEP RESEARCH MODE ---
+resources_store: List[Dict[str, Any]] = []
+
+
+@app.get("/api/resources")
+async def get_resources():
+    """Returns all stored resources (capped at 50)."""
+    return {
+        "status": "success",
+        "total": len(resources_store),
+        "limit": 50,
+        "resources": resources_store,
+    }
+
+
+@app.post("/api/resources/upload")
+async def upload_resource(
+    file: Optional[UploadFile] = File(None),
+    title: str = Form(""),
+    resource_type: str = Form("text"),  # 'pdf' | 'text' | 'link'
+    content: str = Form(""),
+    url: str = Form(""),
+):
+    """Uploads a resource (PDF, text snippet, or research link) up to the 50-item limit."""
+    try:
+        if len(resources_store) >= 50:
+            raise HTTPException(status_code=400, detail="Resource limit reached (maximum 50 resources allowed).")
+
+        item_id = f"res-{int(time.time() * 1000)}"
+        extracted_text = ""
+        item_title = title.strip() or "Untitled Resource"
+
+        if file:
+            file_bytes = await file.read()
+            clean_name = re.sub(r"[^\w\.-]", "_", file.filename or "uploaded.pdf")
+            item_title = title.strip() or clean_name
+            resource_type = "pdf" if file.filename.lower().endswith(".pdf") else "file"
+            
+            # Save file locally
+            file_path = DOCS_DIR / f"{item_id}_{clean_name}"
+            with open(file_path, "wb") as f:
+                f.write(file_bytes)
+
+            if resource_type == "pdf":
+                extracted_text = rag_pipeline._extract_multimodal_pdf(file_bytes)
+            else:
+                extracted_text = file_bytes.decode("utf-8", errors="ignore")[:10000]
+        elif resource_type == "link":
+            item_title = title.strip() or url.strip()
+            extracted_text = f"Reference Link: {url.strip()}\nSummary/Notes: {content.strip()}"
+        else:
+            extracted_text = content.strip()
+
+        resource_entry = {
+            "id": item_id,
+            "title": item_title,
+            "type": resource_type,
+            "url": url.strip() if resource_type == "link" else "",
+            "preview": extracted_text[:300],
+            "text": extracted_text[:15000],
+            "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+
+        resources_store.insert(0, resource_entry)
+
+        return {
+            "status": "success",
+            "message": "Resource added successfully.",
+            "resource": resource_entry,
+            "total": len(resources_store),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/resources/{resource_id}")
+async def delete_resource(resource_id: str):
+    """Deletes a resource from the library."""
+    global resources_store
+    initial_len = len(resources_store)
+    resources_store = [r for r in resources_store if r.get("id") != resource_id]
+    if len(resources_store) == initial_len:
+        raise HTTPException(status_code=404, detail="Resource not found.")
+    return {"status": "success", "message": "Resource deleted.", "remaining": len(resources_store)}
+
+
+@app.post("/api/research")
+async def deep_research(
+    query: str = Form(""),
+    selected_resource_ids: Optional[str] = Form(None),
+):
+    """
+    Gemini-Style Deep Research Mode:
+    Executes deep academic synthesis across all stored resources without line-count limits.
+    """
+    try:
+        clean_query = query.strip()
+        if not clean_query:
+            raise HTTPException(status_code=400, detail="Research query cannot be empty.")
+
+        # Gather context from all or selected resources
+        selected_ids = json.loads(selected_resource_ids) if selected_resource_ids else []
+        contexts = []
+
+        # 1. Include usert.txt workspace context
+        usert_file = DOCS_DIR / "usert.txt"
+        if usert_file.exists():
+            with open(usert_file, "r", encoding="utf-8") as f:
+                contexts.append(f"=== WORKSPACE NOTES ===\n{f.read()}")
+
+        # 2. Include multi-resources
+        for res in resources_store:
+            if not selected_ids or res.get("id") in selected_ids:
+                contexts.append(f"=== RESOURCE: {res.get('title')} ({res.get('type')}) ===\n{res.get('text', '')[:4000]}")
+
+        combined_context = "\n\n---\n\n".join(contexts)
+
+        # Run deep research
+        research_result = await asyncio.to_thread(
+            rag_pipeline.run_deep_research,
+            clean_query,
+            combined_context,
+        )
+
+        return {
+            "status": "success",
+            "query": clean_query,
+            "research_report": research_result,
+            "resources_consulted": len(resources_store),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/prompt")
+async def execute_prompt(request: Request):
+    """
+    Direct prompt execution endpoint for AI Note Summaries and AI Task Breakdown.
+    Accepts JSON body or Form data.
+    """
+    try:
+        content_type = request.headers.get("content-type", "")
+        prompt = ""
+        text_content = ""
+        if "application/json" in content_type:
+            body = await request.json()
+            prompt = body.get("prompt", "")
+            text_content = body.get("text_content", "")
+        else:
+            form = await request.form()
+            prompt = form.get("prompt", "")
+            text_content = form.get("text_content", "")
+
+        usert_file = DOCS_DIR / "usert.txt"
+        if not text_content and usert_file.exists():
+            with open(usert_file, "r", encoding="utf-8") as f:
+                text_content = f.read()
+
+        result = await asyncio.to_thread(
+            rag_pipeline.run,
+            prompt=prompt,
+            text_content=text_content,
+        )
+        return {"status": "success", "rag_answer": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -4,7 +4,14 @@ import FlowchartView from './FlowchartView';
 import QuizFlashcards from './QuizFlashcards';
 import StudySchedule from './StudySchedule';
 
-export default function Report({ tasks = [], notes = [], isDark = false, accessCode = '' }) {
+export default function Report({
+  tasks = [],
+  notes = [],
+  isDark = false,
+  accessCode = '',
+  isGuest = false,
+  onRequireAuth,
+}) {
   const [reportData, setReportData] = useState(null);
   const [pdfFile, setPdfFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -58,7 +65,6 @@ export default function Report({ tasks = [], notes = [], isDark = false, accessC
     try {
       const fd = new FormData();
       fd.append('text_content', textContent);
-
       const [fcRes, qzRes, scRes] = await Promise.all([
         fetch('/api/generate-flowchart', { method: 'POST', headers: getHeaders(), body: fd }).catch(() => null),
         fetch('/api/generate-quiz', { method: 'POST', headers: getHeaders(), body: fd }).catch(() => null),
@@ -85,6 +91,10 @@ export default function Report({ tasks = [], notes = [], isDark = false, accessC
 
   const handleGenerateReport = async (e, overridePrompt = null) => {
     if (e && e.preventDefault) e.preventDefault();
+    if (isGuest) {
+      if (onRequireAuth) onRequireAuth();
+      return;
+    }
     setLoading(true);
 
     const activePrompt = typeof overridePrompt === 'string' ? overridePrompt.trim() : customPrompt.trim();
@@ -162,6 +172,10 @@ ${notes.map((n, i) => `${i + 1}. ${n}`).join('\n') || 'None'}
 
   // Dual-Model Parallel Comparison Execution
   const handleCompareModels = async () => {
+    if (isGuest) {
+      if (onRequireAuth) onRequireAuth();
+      return;
+    }
     setComparing(true);
     setCompareResults(null);
 

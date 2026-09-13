@@ -5,7 +5,8 @@ export default function Taskbar({
   notes = [], 
   onDeleteTask, 
   onDeleteNote, 
-  onEditNote 
+  onEditNote,
+  isDark = false 
 }) {
   // Track completed state for tasks
   const [completedTasks, setCompletedTasks] = useState({});
@@ -40,14 +41,16 @@ export default function Taskbar({
       
       {/* ================= TASKS SECTION ================= */}
       <div className="w-100 d-flex flex-column align-items-center gap-3">
-        <h3 className="text-center fw-bold">Tasks</h3>
+        <h3 className={`text-center fw-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Tasks</h3>
         {tasks.length === 0 ? (
           <p className="text-muted">No tasks added yet.</p>
         ) : (
           tasks.map((item, index) => (
             <div 
               key={index} 
-              className="bg-slate-50 text-dark d-flex justify-content-between align-items-center p-3 rounded-2xl w-100 shadow-sm"
+              className={`d-flex justify-content-between align-items-center p-3 rounded-2xl w-100 shadow-sm border transition-colors ${
+                isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-slate-50 border-slate-200 text-dark'
+              }`}
               style={{ maxWidth: '450px' }}
             >
               <p className={`mb-0 text-break me-3 ${completedTasks[index] ? 'text-decoration-line-through text-muted' : ''}`}>
@@ -70,21 +73,23 @@ export default function Taskbar({
 
       {/* ================= NOTES SECTION ================= */}
       <div className="w-100 d-flex flex-column align-items-center gap-3">
-        <h3 className="text-center fw-bold">Notes</h3>
+        <h3 className={`text-center fw-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Notes</h3>
         {notes.length === 0 ? (
           <p className="text-muted">No notes added yet.</p>
         ) : (
           notes.map((item, index) => (
             <div 
               key={index} 
-              className="bg-slate-50 text-dark d-flex justify-content-between align-items-center p-3 rounded-2xl w-100 shadow-sm"
+              className={`d-flex justify-content-between align-items-center p-3 rounded-2xl w-100 shadow-sm border transition-colors ${
+                isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-slate-50 border-slate-200 text-dark'
+              }`}
               style={{ maxWidth: '450px' }}
             >
               {editingIndex === index ? (
                 <div className="d-flex w-100 me-2 gap-2">
                   <input 
                     type="text" 
-                    className="form-control form-control-sm"
+                    className={`form-control form-control-sm ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100' : ''}`}
                     value={editText} 
                     onChange={(e) => setEditText(e.target.value)} 
                   />

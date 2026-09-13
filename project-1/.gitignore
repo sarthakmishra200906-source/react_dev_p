@@ -34,3 +34,8 @@ __pycache__/
 *$py.class
 backend/docs/*
 !backend/docs/.gitkeep
+
+# Private User Documentation
+reportmodel.md
+**/reportmodel.md
+
