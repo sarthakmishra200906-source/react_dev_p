@@ -135,6 +135,8 @@ export default function Dashboard({
               resources={searchQuery ? filteredResources : resources}
               isGuest={isGuest}
               onRequireAuth={onRequireAuth}
+              onSaveNote={guardAction(onSaveNote)}
+              onAddResource={guardAction(onAddResource)}
             />
           </div>
         )}
