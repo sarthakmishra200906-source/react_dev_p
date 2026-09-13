@@ -38,4 +38,7 @@ backend/docs/*
 # Private User Documentation
 reportmodel.md
 **/reportmodel.md
+space.md
+**/space.md
+
 
