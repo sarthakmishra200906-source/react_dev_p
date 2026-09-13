@@ -16,7 +16,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -92,15 +92,25 @@ class Project1RAG:
 
         full_raw_context = f"{text_content}\n\n{extracted_pdf_text}".strip()
 
-        if not full_raw_context and not prompt:
+        # Check for valid tasks, notes, or attached PDF
+        tasks_check, notes_check = self._extract_tasks_and_notes(text_content)
+        has_pdf = bool(pdf_bytes and len(pdf_bytes) > 0)
+        is_custom_instruction = bool(
+            prompt
+            and prompt.strip()
+            and prompt.strip().lower() not in {"default", "none", "", "null"}
+        )
+
+        # Fallback Rule for Empty / Blank Workspace State:
+        if not tasks_check and not notes_check and not has_pdf and not is_custom_instruction:
             return (
-                "1. No tasks or notes found in usert.txt.\n"
-                "2. Please add tasks and notes in the UI to get a summary.\n"
-                "3. Attach a PDF document for multi-modal analysis if desired.\n"
-                "4. Start by typing your first task in the input bar above.\n"
-                "5. Save important reminders as notes for quick reference.\n"
-                "6. Click Generate AI Report to process and index your data.\n"
-                "7. Use custom prompts whenever you need specific answers."
+                "1. 🚀 Welcome to your AI Multi-Modal Study & Task Assistant!\n"
+                "2. 📌 Step 1: Add your active study tasks in the 'Enter your task' section above.\n"
+                "3. 📝 Step 2: Log key notes, deadlines, or strategies in the 'Enter your note' field.\n"
+                "4. 📄 Step 3: (Optional) Attach handwritten notes or exam PDFs for multi-modal context.\n"
+                "5. 💡 Step 4: Click 'Generate AI Report' for a custom 7-line study plan based on your context.\n"
+                "6. ❓ Custom Query Tip: Type a question in the query box to get a focused 5-line answer.\n"
+                "7. 🎯 Action Tip: Clear your session anytime using the 'Clear' button to start fresh context."
             )
 
         # 2. Advanced Semantic & Atomic Chunking
@@ -492,24 +502,19 @@ class Project1RAG:
             return None
         return None
 
-    def _synthesize_offline_response(
-        self,
-        context_str: str,
-        raw_prompt: str,
-        is_custom_instruction: bool,
-    ) -> str:
-        """
-        Synthesizes real, dynamic user guidance directly from tasks, notes, and prompts.
-        Guarantees non-generic, informative responses even when offline.
-        """
-        tasks_found = []
-        notes_found = []
+    def _extract_tasks_and_notes(self, text: str) -> Tuple[List[str], List[str]]:
+        """Extracts valid non-placeholder tasks and notes from formatted text."""
+        tasks = []
+        notes = []
+        if not text:
+            return tasks, notes
 
-        # Parse tasks and notes from the context
         in_tasks = False
         in_notes = False
-        for line in context_str.splitlines():
+        for line in text.splitlines():
             line_str = line.strip()
+            if not line_str or line_str in {"---", "--", "-", "==="}:
+                continue
             if "=== TASKS ===" in line_str:
                 in_tasks = True
                 in_notes = False
@@ -523,14 +528,46 @@ class Project1RAG:
                 in_notes = False
                 continue
 
-            if in_tasks and line_str and line_str.lower() != "none":
-                clean_t = re.sub(r"^\d+[\.\)\-]\s*", "", line_str)
-                if clean_t:
-                    tasks_found.append(clean_t)
-            elif in_notes and line_str and line_str.lower() != "none":
-                clean_n = re.sub(r"^\d+[\.\)\-]\s*", "", line_str)
-                if clean_n:
-                    notes_found.append(clean_n)
+            clean = re.sub(r"^\d+[\.\)\-]\s*", "", line_str).strip()
+            if clean and clean.lower() not in {"none", "null", "empty", "---", "--", "-"}:
+                if in_tasks:
+                    tasks.append(clean)
+                elif in_notes:
+                    notes.append(clean)
+        return tasks, notes
+
+    def _synthesize_offline_response(
+        self,
+        context_str: str,
+        raw_prompt: str,
+        is_custom_instruction: bool,
+    ) -> str:
+        """
+        Synthesizes real, dynamic user guidance directly from tasks, notes, and prompts.
+        Guarantees non-generic, informative responses even when offline.
+        """
+        tasks_found, notes_found = self._extract_tasks_and_notes(context_str)
+
+        # Fallback Rule for Empty / Blank Workspace State:
+        if not tasks_found and not notes_found:
+            if not is_custom_instruction:
+                return (
+                    "1. 🚀 Welcome to your AI Multi-Modal Study & Task Assistant!\n"
+                    "2. 📌 Step 1: Add your active study tasks in the 'Enter your task' section above.\n"
+                    "3. 📝 Step 2: Log key notes, deadlines, or strategies in the 'Enter your note' field.\n"
+                    "4. 📄 Step 3: (Optional) Attach handwritten notes or exam PDFs for multi-modal context.\n"
+                    "5. 💡 Step 4: Click 'Generate AI Report' for a custom 7-line study plan based on your context.\n"
+                    "6. ❓ Custom Query Tip: Type a question in the query box to get a focused 5-line answer.\n"
+                    "7. 🎯 Action Tip: Clear your session anytime using the 'Clear' button to start fresh context."
+                )
+            else:
+                return (
+                    f"1. Query Notice: Workspace has no tasks or notes logged yet to answer '{raw_prompt}'.\n"
+                    "2. Getting Started: Type and save your tasks and notes in the panels above.\n"
+                    "3. Document Support: You can also upload a PDF to extract study material automatically.\n"
+                    "4. Focused Answers: Re-submit your query to receive a tailored 5-line response.\n"
+                    "5. Action: Add at least one task or attach your document to proceed."
+                )
 
         task_desc = ", ".join(f"'{t}'" for t in tasks_found) if tasks_found else "No active tasks logged"
         primary_task = tasks_found[0] if tasks_found else "your primary workspace task"
