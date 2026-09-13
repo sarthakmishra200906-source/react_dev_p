@@ -17,13 +17,6 @@ export default defineConfig({
         secure: false,
       },
     },
-  },
-  preview: {
-    host: '0.0.0.0',
-    port: 5173,
-    cors: true,
-    allowedHosts: true,
-  },
     watch: {
       ignored: [
         '**/backend/**',
@@ -34,5 +27,11 @@ export default defineConfig({
         '**/.env*',
       ],
     },
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: 5173,
+    cors: true,
+    allowedHosts: true,
   },
 })
