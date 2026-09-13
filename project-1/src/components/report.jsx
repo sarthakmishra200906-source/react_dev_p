@@ -184,10 +184,15 @@ ${notes.map((n, i) => `${i + 1}. ${n}`).join('\n') || 'None'}
             </div>
           </div>
 
-          <div className="report-body my-3 p-3 bg-light rounded border">
-            <pre className="mb-0 text-wrap" style={{ fontFamily: 'inherit', whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
-              {reportData.summary}
-            </pre>
+          <div className="report-body my-3 p-3 bg-light rounded border" style={{ whiteSpace: 'pre-line', lineHeight: '1.7' }}>
+            {reportData.summary
+              .split('\n')
+              .filter((line) => line.trim().length > 0)
+              .map((line, idx) => (
+                <p key={idx} className="mb-2 text-dark fw-normal" style={{ wordBreak: 'break-word' }}>
+                  {line}
+                </p>
+              ))}
           </div>
 
           <div className="mt-3 pt-2 text-end text-muted small border-top">
