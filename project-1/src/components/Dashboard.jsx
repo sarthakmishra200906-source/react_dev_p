@@ -1,10 +1,24 @@
 import React from 'react';
-import { Lock, ShieldAlert, Sparkles, ArrowRight } from 'lucide-react';
+import {
+  Lock,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  ArrowRight,
+  LayoutDashboard,
+  GraduationCap,
+  Microscope,
+  Folder,
+  CheckSquare,
+  StickyNote,
+} from 'lucide-react';
 import Report from './report';
 import ResearchMode from './ResearchMode';
 import ResourceHub from './ResourceHub';
 import StandardTaskManager from './StandardTaskManager';
 import ImportantNotes from './ImportantNotes';
+import StudyDashboard from './StudyDashboard';
+import AdminDashboard from './AdminDashboard';
 
 export default function Dashboard({
   user,
@@ -21,13 +35,16 @@ export default function Dashboard({
   onEditNote,
   onAddResource,
   onDeleteResource,
+  onWipeAllData,
   accessCode = '',
   activeTab = 'rag',
   onTabChange,
   searchQuery = '',
+  onLogoutAdmin,
 }) {
   // Guest / Demo mode restriction check
   const isGuest = !user || user.isDemo || user.role === 'Demo User' || user.role === 'Demo Mode';
+  const isAdmin = user?.role === 'admin' || user?.is_admin;
 
   const onRequireAuth = () => {
     if (onOpenAuth) onOpenAuth('login');
@@ -42,12 +59,32 @@ export default function Dashboard({
   };
 
   // Live filter across all workspace data based on top navbar search
+  const [selectedResourceId, setSelectedResourceId] = React.useState(() => resources[0]?.id || null);
+
+  React.useEffect(() => {
+    if (resources.length > 0 && (!selectedResourceId || !resources.some((r) => r.id === selectedResourceId))) {
+      setSelectedResourceId(resources[0].id);
+    } else if (resources.length === 0) {
+      setSelectedResourceId(null);
+    }
+  }, [resources, selectedResourceId]);
+
   const filteredTasks = tasks.filter((t) => t.toLowerCase().includes(searchQuery.toLowerCase()));
   const filteredNotes = notes.filter((n) => n.toLowerCase().includes(searchQuery.toLowerCase()));
   const filteredResources = resources.filter((r) =>
     (r.title && r.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
     (r.preview && r.preview.toLowerCase().includes(searchQuery.toLowerCase()))
   );
+
+  const dashboardTabs = [
+    { id: 'rag', label: 'AI RAG Studio', icon: <LayoutDashboard size={16} /> },
+    { id: 'study', label: 'Study Mode', icon: <GraduationCap size={16} />, badge: 'Custom Resource Scope' },
+    { id: 'research', label: 'Gemini Research', icon: <Microscope size={16} /> },
+    { id: 'resources', label: 'Sources Hub', icon: <Folder size={16} />, count: resources.length },
+    { id: 'tasks', label: 'Task Manager', icon: <CheckSquare size={16} />, count: tasks.length },
+    { id: 'notes', label: 'Important Notes', icon: <StickyNote size={16} />, count: notes.length },
+    ...(isAdmin ? [{ id: 'admin', label: 'Admin Portal', icon: <ShieldCheck size={16} />, badge: 'Secure Root' }] : []),
+  ];
 
   return (
     <div className="dashboard-notebooklm w-100 py-1">
@@ -98,6 +135,54 @@ export default function Dashboard({
         </div>
       )}
 
+      {/* Prominent Workspace Modes Navigation Bar */}
+      <div className={`p-2 rounded-2xl border mb-3.5 shadow-sm d-flex gap-2 overflow-auto align-items-center ${
+        isDark ? 'bg-neutral-900/90 border-neutral-800' : 'bg-slate-100/90 border-slate-200'
+      }`}>
+        <span className="small text-muted fw-bold text-uppercase px-2 d-none d-lg-inline" style={{ fontSize: '0.72rem' }}>
+          Workspace Modes:
+        </span>
+        {dashboardTabs.map((tab) => {
+          const isActive = activeTab === tab.id;
+          const isTabAdmin = tab.id === 'admin';
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => onTabChange && onTabChange(tab.id)}
+              className={`btn btn-sm rounded-pill px-3.5 py-1.5 fw-semibold d-flex align-items-center gap-2 flex-shrink-0 transition-all ${
+                isActive
+                  ? isTabAdmin ? 'btn-danger text-white shadow-sm' : 'btn-primary text-white shadow-sm'
+                  : isDark
+                  ? 'btn-dark border-neutral-800 text-slate-300 hover:bg-neutral-800'
+                  : 'btn-white border text-slate-700 bg-white hover:bg-slate-50'
+              }`}
+            >
+              {tab.icon}
+              <span>{tab.label}</span>
+              {tab.badge && (
+                <span className={`badge rounded-pill small px-2 py-0.5 ${
+                  isActive
+                    ? 'bg-white/20 text-white'
+                    : isTabAdmin
+                    ? 'bg-danger-subtle text-danger border border-danger-subtle'
+                    : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30'
+                }`}>
+                  {tab.badge}
+                </span>
+              )}
+              {tab.count !== undefined && tab.count > 0 && (
+                <span className={`badge rounded-pill small ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-secondary-subtle text-secondary'
+                }`}>
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Search Filter Metrics Banner (Only when searching) */}
       {searchQuery && (
         <div className={`p-2.5 px-3 rounded-2xl border mb-3 small d-flex gap-3 align-items-center flex-wrap shadow-sm ${
@@ -110,77 +195,117 @@ export default function Dashboard({
         </div>
       )}
 
-      {/* Main Studio Viewport */}
+      {/* Main Studio Viewport - Keep panes mounted to preserve state across tab switches */}
       <div className="notebook-viewport w-100">
         {/* VIEW 1: AI RAG Studio */}
-        {activeTab === 'rag' && (
-          <div className="studio-pane">
-            <Report
-              tasks={searchQuery ? filteredTasks : tasks}
-              notes={searchQuery ? filteredNotes : notes}
-              isDark={isDark}
-              accessCode={accessCode}
-              isGuest={isGuest}
-              onRequireAuth={onRequireAuth}
-            />
-          </div>
-        )}
+        <div className="studio-pane" style={{ display: activeTab === 'rag' ? 'block' : 'none' }}>
+          <Report
+            tasks={searchQuery ? filteredTasks : tasks}
+            notes={searchQuery ? filteredNotes : notes}
+            isDark={isDark}
+            accessCode={accessCode}
+            isGuest={isGuest}
+            onRequireAuth={onRequireAuth}
+            onAddResource={guardAction(onAddResource)}
+            onWipeAllData={onWipeAllData}
+            onOpenStudyMode={() => onTabChange && onTabChange('study')}
+            user={user}
+            isAdmin={isAdmin}
+          />
+        </div>
 
         {/* VIEW 2: Gemini Deep Research */}
-        {activeTab === 'research' && (
-          <div className="studio-pane">
-            <ResearchMode
-              isDark={isDark}
-              accessCode={accessCode}
-              resources={searchQuery ? filteredResources : resources}
-              isGuest={isGuest}
-              onRequireAuth={onRequireAuth}
-              onSaveNote={guardAction(onSaveNote)}
-              onAddResource={guardAction(onAddResource)}
-            />
-          </div>
-        )}
+        <div className="studio-pane" style={{ display: activeTab === 'research' ? 'block' : 'none' }}>
+          <ResearchMode
+            isDark={isDark}
+            accessCode={accessCode}
+            resources={searchQuery ? filteredResources : resources}
+            user={user}
+            isGuest={isGuest}
+            onRequireAuth={onRequireAuth}
+            onSaveNote={guardAction(onSaveNote)}
+            onAddResource={guardAction(onAddResource)}
+            onWipeAllData={onWipeAllData}
+            selectedResourceId={selectedResourceId}
+            onSelectResource={setSelectedResourceId}
+            onOpenResources={() => onTabChange && onTabChange('resources')}
+          />
+        </div>
 
         {/* VIEW 3: Sources & Resource Hub */}
-        {activeTab === 'resources' && (
-          <div className="studio-pane">
-            <ResourceHub
-              resources={searchQuery ? filteredResources : resources}
-              onAddResource={guardAction(onAddResource)}
-              onDeleteResource={guardAction(onDeleteResource)}
-              isDark={isDark}
-              accessCode={accessCode}
-              isGuest={isGuest}
-              onRequireAuth={onRequireAuth}
-            />
-          </div>
-        )}
+        <div className="studio-pane" style={{ display: activeTab === 'resources' ? 'block' : 'none' }}>
+          <ResourceHub
+            resources={searchQuery ? filteredResources : resources}
+            onAddResource={guardAction(onAddResource)}
+            onDeleteResource={guardAction(onDeleteResource)}
+            isDark={isDark}
+            accessCode={accessCode}
+            isGuest={isGuest}
+            onRequireAuth={onRequireAuth}
+            onWipeAllData={onWipeAllData}
+            user={user}
+            isAdmin={isAdmin}
+          />
+        </div>
 
         {/* VIEW 4: Standard Task Manager */}
-        {activeTab === 'tasks' && (
-          <div className="studio-pane">
-            <StandardTaskManager
-              tasks={searchQuery ? filteredTasks : tasks}
-              onSaveTask={guardAction(onSaveTask)}
-              onDeleteTask={guardAction(onDeleteTask)}
-              isDark={isDark}
-              isGuest={isGuest}
-              onRequireAuth={onRequireAuth}
-            />
-          </div>
-        )}
+        <div className="studio-pane" style={{ display: activeTab === 'tasks' ? 'block' : 'none' }}>
+          <StandardTaskManager
+            tasks={searchQuery ? filteredTasks : tasks}
+            onSaveTask={guardAction(onSaveTask)}
+            onDeleteTask={guardAction(onDeleteTask)}
+            isDark={isDark}
+            accessCode={accessCode}
+            isGuest={isGuest}
+            onRequireAuth={onRequireAuth}
+            onWipeAllData={onWipeAllData}
+          />
+        </div>
 
-        {/* VIEW 5: Important Notes Hub */}
-        {activeTab === 'notes' && (
-          <div className="studio-pane">
-            <ImportantNotes
-              notes={searchQuery ? filteredNotes : notes}
-              onSaveNote={guardAction(onSaveNote)}
-              onDeleteNote={guardAction(onDeleteNote)}
-              onEditNote={guardAction(onEditNote)}
+        {/* VIEW 5: Important Notes & Vault */}
+        <div className="studio-pane" style={{ display: activeTab === 'notes' ? 'block' : 'none' }}>
+          <ImportantNotes
+            notes={searchQuery ? filteredNotes : notes}
+            onSaveNote={guardAction(onSaveNote)}
+            onDeleteNote={guardAction(onDeleteNote)}
+            onEditNote={guardAction(onEditNote)}
+            isDark={isDark}
+            accessCode={accessCode}
+            isGuest={isGuest}
+            onRequireAuth={onRequireAuth}
+            onWipeAllData={onWipeAllData}
+          />
+        </div>
+
+        {/* VIEW 6: Study Mode Dashboard (All Footer Study Tools) */}
+        <div className="studio-pane" style={{ display: activeTab === 'study' ? 'block' : 'none' }}>
+          <StudyDashboard
+            isDark={isDark}
+            tasks={searchQuery ? filteredTasks : tasks}
+            notes={searchQuery ? filteredNotes : notes}
+            resources={searchQuery ? filteredResources : resources}
+            onSaveTask={guardAction(onSaveTask)}
+            onDeleteTask={guardAction(onDeleteTask)}
+            onSaveNote={guardAction(onSaveNote)}
+            onDeleteNote={guardAction(onDeleteNote)}
+            onEditNote={guardAction(onEditNote)}
+            isGuest={isGuest}
+            onRequireAuth={onRequireAuth}
+            onOpenResearch={() => onTabChange && onTabChange('research')}
+            onOpenResources={() => onTabChange && onTabChange('resources')}
+            user={user}
+            isAdmin={isAdmin}
+          />
+        </div>
+
+        {/* VIEW 7: Administrator Control Portal */}
+        {isAdmin && (
+          <div className="studio-pane" style={{ display: activeTab === 'admin' ? 'block' : 'none' }}>
+            <AdminDashboard
+              adminUser={user}
+              onLogoutAdmin={onLogoutAdmin}
+              onSwitchToUserPortal={() => onTabChange && onTabChange('rag')}
               isDark={isDark}
-              isGuest={isGuest}
-              onRequireAuth={onRequireAuth}
             />
           </div>
         )}

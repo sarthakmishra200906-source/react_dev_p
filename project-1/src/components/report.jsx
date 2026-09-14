@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Play, Pause, Square, FastForward, Scale, Sparkles, RefreshCw } from 'lucide-react';
+import { Volume2, VolumeX, Play, Pause, Square, FastForward, Scale, Sparkles, RefreshCw, Trash2 } from 'lucide-react';
 import FlowchartView from './FlowchartView';
 import QuizFlashcards from './QuizFlashcards';
 import StudySchedule from './StudySchedule';
@@ -11,18 +11,95 @@ export default function Report({
   accessCode = '',
   isGuest = false,
   onRequireAuth,
+  onAddResource,
+  onWipeAllData,
+  onOpenStudyMode,
+  user = null,
+  isAdmin = false,
 }) {
-  const [reportData, setReportData] = useState(null);
+  const isPaid = Boolean(isAdmin || user?.is_paid || user?.tier === 'paid' || user?.role === 'admin');
+  const [reportData, setReportData] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('study_report_data');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [pdfFile, setPdfFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
-  const [chatHistory, setChatHistory] = useState([]);
+  const [chatHistory, setChatHistory] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('study_chat_history');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Multi-Modal Interactive States
-  const [flowchartData, setFlowchartData] = useState(null);
-  const [quizData, setQuizData] = useState(null);
-  const [scheduleData, setScheduleData] = useState(null);
+  const [flowchartData, setFlowchartData] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('study_flowchart_data');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [quizData, setQuizData] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('study_quiz_data');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [scheduleData, setScheduleData] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('study_schedule_data');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [icsContent, setIcsContent] = useState('');
+
+  // Persist report data into sessionStorage so it survives tab switching and refresh
+  useEffect(() => {
+    try {
+      if (reportData) sessionStorage.setItem('study_report_data', JSON.stringify(reportData));
+      else sessionStorage.removeItem('study_report_data');
+    } catch {}
+  }, [reportData]);
+
+  useEffect(() => {
+    try {
+      if (chatHistory && chatHistory.length > 0) sessionStorage.setItem('study_chat_history', JSON.stringify(chatHistory));
+      else sessionStorage.removeItem('study_chat_history');
+    } catch {}
+  }, [chatHistory]);
+
+  useEffect(() => {
+    try {
+      if (flowchartData) sessionStorage.setItem('study_flowchart_data', JSON.stringify(flowchartData));
+      else sessionStorage.removeItem('study_flowchart_data');
+    } catch {}
+  }, [flowchartData]);
+
+  useEffect(() => {
+    try {
+      if (quizData) sessionStorage.setItem('study_quiz_data', JSON.stringify(quizData));
+      else sessionStorage.removeItem('study_quiz_data');
+    } catch {}
+  }, [quizData]);
+
+  useEffect(() => {
+    try {
+      if (scheduleData) sessionStorage.setItem('study_schedule_data', JSON.stringify(scheduleData));
+      else sessionStorage.removeItem('study_schedule_data');
+    } catch {}
+  }, [scheduleData]);
 
   // Dual-Model Comparison State
   const [compareMode, setCompareMode] = useState(false);
@@ -36,9 +113,8 @@ export default function Report({
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const utteranceRef = useRef(null);
 
-  // On initial mount / page refresh: clear backend docs to save space
+  // Component cleanup only - DO NOT wipe backend database on tab mount
   useEffect(() => {
-    fetch('/api/clear-session', { method: 'POST' }).catch(() => {});
     return () => {
       if (supportsSpeech && window.speechSynthesis) {
         window.speechSynthesis.cancel();
@@ -54,6 +130,13 @@ export default function Report({
 
   const getHeaders = () => {
     const headers = {};
+    if (user?.token) {
+      headers['Authorization'] = `Bearer ${user.token}`;
+      headers['x-user-token'] = user.token;
+    }
+    if (user?.email) {
+      headers['x-user-email'] = user.email;
+    }
     if (accessCode) {
       headers['x-access-code'] = accessCode;
     }
@@ -72,17 +155,26 @@ export default function Report({
       ]);
 
       if (fcRes && fcRes.ok) {
-        const fc = await fcRes.json();
-        setFlowchartData(fc.data);
+        const ct = fcRes.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          const fc = await fcRes.json();
+          setFlowchartData(fc.data);
+        }
       }
       if (qzRes && qzRes.ok) {
-        const qz = await qzRes.json();
-        setQuizData(qz.data);
+        const ct = qzRes.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          const qz = await qzRes.json();
+          setQuizData(qz.data);
+        }
       }
       if (scRes && scRes.ok) {
-        const sc = await scRes.json();
-        setScheduleData(sc.schedule);
-        setIcsContent(sc.ics_content);
+        const ct = scRes.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          const sc = await scRes.json();
+          setScheduleData(sc.schedule);
+          setIcsContent(sc.ics_content);
+        }
       }
     } catch (e) {
       console.warn('Interactive data fetch error:', e);
@@ -116,28 +208,30 @@ ${notes.map((n, i) => `${i + 1}. ${n}`).join('\n') || 'None'}
     }
 
     try {
-      let response;
-      try {
-        response = await fetch('/api/generate-report', {
-          method: 'POST',
-          headers: getHeaders(),
-          body: formData,
-        });
-      } catch (err) {
-        const host = window.location.hostname || 'localhost';
-        response = await fetch(`http://${host}:8000/api/generate-report`, {
-          method: 'POST',
-          headers: getHeaders(),
-          body: formData,
-        });
+      const response = await fetch('/api/generate-report', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: formData,
+      });
+
+      const contentType = response.headers.get('content-type') || '';
+      let data = {};
+      if (contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        throw new Error(text.slice(0, 150) || `Server returned status ${response.status}`);
       }
 
       if (!response.ok) {
-        throw new Error(`Server returned status ${response.status}`);
+        throw new Error(data.detail || `Server returned status ${response.status}`);
       }
 
-      const data = await response.json();
       const resultText = data.result || 'No response received.';
+
+      if (data.resource && onAddResource) {
+        onAddResource(data.resource);
+      }
 
       setReportData({
         summary: resultText,
@@ -157,9 +251,12 @@ ${notes.map((n, i) => `${i + 1}. ${n}`).join('\n') || 'None'}
       fetchInteractiveFeatures(textContent);
     } catch (error) {
       console.error('RAG Pipeline error:', error);
+      const isConn = error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError');
+      const errorMsg = isConn
+        ? 'Could not connect to the backend server. Please verify backend is running on port 8000.'
+        : `AI Generation Notice: ${error.message}`;
       setReportData({
-        summary:
-          'Error connecting to RAG backend server on port 8000.\n\nPlease start the backend to listen on all WiFi interfaces:\ncd project-1/backend\npython -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload',
+        summary: errorMsg,
         totalItems: tasks.length + notes.length,
         hasPdf: !!pdfFile,
         generatedAt: new Date().toLocaleTimeString(),
@@ -190,6 +287,9 @@ ${notes.map((n, i) => `${i + 1}. ${n}`).join('\n') || 'None'}
     const fd = new FormData();
     fd.append('prompt', customPrompt.trim() || 'Provide a 5-line prioritized revision strategy.');
     fd.append('text_content', textContent);
+    if (pdfFile) {
+      fd.append('pdf', pdfFile);
+    }
 
     try {
       const res = await fetch('/api/compare-models', {
@@ -357,6 +457,28 @@ ${notes.map((n, i) => `${i + 1}. ${n}`).join('\n') || 'None'}
             {comparing ? 'Comparing Cloud & Local...' : 'Run Parallel Comparison'}
           </button>
         )}
+
+        {onWipeAllData && (
+          <button
+            type="button"
+            className="btn btn-outline-danger rounded-pill px-3 shadow-sm d-flex align-items-center gap-1.5"
+            onClick={() => {
+              onWipeAllData();
+              setReportData(null);
+              setPdfFile(null);
+              setCustomPrompt('');
+              setChatHistory([]);
+              setCompareResults(null);
+              setFlowchartData(null);
+              setQuizData(null);
+              setScheduleData(null);
+            }}
+            title="Clear current workspace documents and analysis results"
+          >
+            <Trash2 size={16} />
+            Clear Resources
+          </button>
+        )}
       </div>
 
       {/* Parallel Dual Model Comparison Card */}
@@ -489,11 +611,32 @@ ${notes.map((n, i) => `${i + 1}. ${n}`).join('\n') || 'None'}
         </div>
       )}
 
+      {/* Quick Link to Dedicated Study Mode */}
+      {onOpenStudyMode && (
+        <div className={`mt-4 p-3 px-4 rounded-2xl border d-flex justify-content-between align-items-center flex-wrap gap-2 ${
+          isDark ? 'bg-indigo-950/40 border-indigo-500/30 text-indigo-200' : 'bg-indigo-50/80 border-indigo-200 text-indigo-950'
+        }`}>
+          <div className="d-flex align-items-center gap-2">
+            <Sparkles size={16} className="text-indigo-400" />
+            <span className="small fw-semibold">
+              Want to customize study tools by specific uploaded resources and unlock up to 50 active recall cards?
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenStudyMode}
+            className="btn btn-sm btn-primary rounded-pill px-3 py-1 fw-semibold shadow-sm"
+          >
+            Open Study Mode Suite →
+          </button>
+        </div>
+      )}
+
       {/* Interactive Concept Mind Map & Flowchart */}
       <FlowchartView data={flowchartData} isDark={isDark} />
 
       {/* PDF Visual Flashcards & Quiz */}
-      <QuizFlashcards data={quizData} isDark={isDark} />
+      <QuizFlashcards data={quizData} isDark={isDark} isPaid={isPaid} isAdmin={isAdmin} />
 
       {/* Interactive Study Schedule & iCal Export */}
       <StudySchedule schedule={scheduleData} icsContent={icsContent} isDark={isDark} />

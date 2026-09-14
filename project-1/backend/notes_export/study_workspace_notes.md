@@ -1,21 +1,16 @@
 ---
 title: Study Workspace & Revision Notes
-updated: 2026-09-13 23:05:23
+updated: 2026-09-14 03:03:08
 tags:
   - study-plan
-  - dbms
-  - ai-rag
+  - multi-vector-rag
 ---
 
 # 📚 Study Workspace Notes
-
-*Last synchronized from AI Assistant on 2026-09-13 23:05:23*
+*Last synchronized: 2026-09-14 03:03:08*
 
 === TASKS ===
 None
 
 === NOTES ===
 None
-
----
-*Auto-synced for Obsidian, VS Code, and Markdown readers.*

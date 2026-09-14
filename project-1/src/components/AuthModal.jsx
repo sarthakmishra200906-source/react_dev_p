@@ -14,6 +14,7 @@ import {
   Check,
   AlertCircle,
   ArrowLeft,
+  Sparkles,
 } from 'lucide-react';
 
 export default function AuthModal({
@@ -23,6 +24,7 @@ export default function AuthModal({
   onLogin,
   isDark = false,
   initialTab = 'login',
+  onRequestAccess,
 }) {
   const [tab, setTab] = useState(initialTab || 'login'); // 'login' | 'register' | 'forgot'
   const [email, setEmail] = useState('');
@@ -41,10 +43,17 @@ export default function AuthModal({
   const [resetError, setResetError] = useState('');
   const [resetSuccess, setResetSuccess] = useState('');
 
+  // Mode error & loading state
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [authSuccess, setAuthSuccess] = useState('');
+
   // Sync tab with initialTab whenever modal opens
   useEffect(() => {
     if (isOpen) {
       setTab(initialTab || 'login');
+      setAuthError('');
+      setAuthSuccess('');
       setResetError('');
       setResetSuccess('');
       setShowPassword(false);
@@ -63,23 +72,138 @@ export default function AuthModal({
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    const userObj = {
-      name: name.trim() || (email ? email.split('@')[0] : 'Study Scholar'),
-      email: email.trim() || 'scholar@study.ai',
-      role: 'Student Researcher',
-      authenticated: true,
-    };
+    setAuthError('');
+    setAuthSuccess('');
+    const cleanEmail = email.trim().toLowerCase();
 
-    if (rememberMe) {
+    // 1. Hardcoded Administrator Login Flow
+    if (cleanEmail === 'sarthaklove71@gmail.com' || cleanEmail === 'sarthakmishra200906@gmail.com') {
+      setAuthLoading(true);
       try {
-        localStorage.setItem('study_auth_user', JSON.stringify(userObj));
-      } catch (err) {}
+        const res = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, password: password }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || 'Invalid administrative credentials.');
+        }
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('study_admin_token', data.token);
+        }
+        const userObj = {
+          ...data.user,
+          token: data.token,
+          authenticated: true,
+        };
+        if (rememberMe) {
+          try {
+            localStorage.setItem('study_auth_user', JSON.stringify(userObj));
+          } catch (err) {}
+        }
+        handleAuthCallback(userObj);
+        onClose();
+        return;
+      } catch (err) {
+        setAuthError(err.message || 'Authentication error.');
+        setAuthLoading(false);
+        return;
+      }
     }
 
-    handleAuthCallback(userObj);
-    onClose();
+    // 2. User Registration Flow
+    if (tab === 'register') {
+      if (!name.trim()) {
+        setAuthError('Please provide your full name to register.');
+        return;
+      }
+      setAuthLoading(true);
+      try {
+        const res = await fetch('/api/user/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name.trim(), email: cleanEmail, password: password }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || 'Registration could not be completed.');
+        }
+
+        setAuthSuccess('Account registered successfully! Now please submit your Access Request.');
+        setTab('login');
+        if (typeof onRequestAccess === 'function') {
+          setTimeout(() => {
+            onRequestAccess(cleanEmail, name.trim());
+            onClose();
+          }, 1000);
+        }
+      } catch (err) {
+        setAuthError(err.message || 'Registration failed.');
+      } finally {
+        setAuthLoading(false);
+      }
+      return;
+    }
+
+    // 3. User Login Flow
+    setAuthLoading(true);
+    try {
+      const res = await fetch('/api/user/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, password: password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Invalid email or password.');
+      }
+
+      if (data.status === 'needs_request') {
+        setAuthError('Account registered, but you must submit an Access Request before using the workspace.');
+        if (typeof onRequestAccess === 'function') {
+          setTimeout(() => {
+            onRequestAccess(cleanEmail, data.user?.name || name);
+            onClose();
+          }, 1200);
+        }
+        setAuthLoading(false);
+        return;
+      }
+
+      if (data.status === 'pending_approval') {
+        setAuthError('Your access request is currently pending administrator approval. Please wait for an admin to approve your account.');
+        setAuthLoading(false);
+        return;
+      }
+
+      if (data.status === 'revoked') {
+        setAuthError('Your server access was revoked or deactivated by an administrator.');
+        setAuthLoading(false);
+        return;
+      }
+
+      const userObj = {
+        ...data.user,
+        token: data.token,
+        authenticated: true,
+      };
+
+      if (rememberMe) {
+        try {
+          localStorage.setItem('study_auth_user', JSON.stringify(userObj));
+        } catch (err) {}
+      }
+
+      handleAuthCallback(userObj);
+      onClose();
+    } catch (err) {
+      setAuthError(err.message || 'Authentication error.');
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   const handleResetPassword = (e) => {
@@ -121,19 +245,20 @@ export default function AuthModal({
     }, 900);
   };
 
-  const handleGuestLogin = () => {
-    const guestObj = {
-      name: 'Guest Scholar',
-      email: 'guest@study.ai',
-      role: 'Demo Mode',
+  const handleDemoLogin = () => {
+    const demoObj = {
+      name: 'Demo Researcher',
+      email: 'demo@study.ai',
+      role: 'Student Researcher',
+      token: 'usr-demo-token-studyai-2026',
       authenticated: true,
     };
     if (rememberMe) {
       try {
-        localStorage.setItem('study_auth_user', JSON.stringify(guestObj));
+        localStorage.setItem('study_auth_user', JSON.stringify(demoObj));
       } catch (err) {}
     }
-    handleAuthCallback(guestObj);
+    handleAuthCallback(demoObj);
     onClose();
   };
 
@@ -317,6 +442,18 @@ export default function AuthModal({
             ) : (
               /* ================= LOGIN & REGISTER FORM ================= */
               <form onSubmit={handleSubmit} className="d-flex flex-column gap-3">
+                {authError && (
+                  <div className="alert alert-danger py-2 px-3 small rounded-2xl d-flex align-items-center gap-2 mb-0">
+                    <AlertCircle size={16} className="flex-shrink-0" />
+                    <span>{authError}</span>
+                  </div>
+                )}
+                {authSuccess && (
+                  <div className="alert alert-success py-2 px-3 small rounded-2xl d-flex align-items-center gap-2 mb-0">
+                    <Check size={16} className="flex-shrink-0" />
+                    <span>{authSuccess}</span>
+                  </div>
+                )}
                 {tab === 'register' && (
                   <div>
                     <label className="form-label small fw-medium mb-1">Your Full Name:</label>
@@ -415,34 +552,20 @@ export default function AuthModal({
 
                 <button
                   type="submit"
+                  disabled={authLoading}
                   className="btn btn-primary rounded-pill py-2.5 mt-1 fw-semibold shadow-sm d-flex align-items-center justify-content-center gap-2"
                 >
-                  <span>{tab === 'login' ? 'Sign In & Open Dashboard' : 'Create Account & Start'}</span>
+                  <span>
+                    {authLoading
+                      ? 'Verifying...'
+                      : tab === 'login'
+                      ? 'Sign In & Open Dashboard'
+                      : 'Create Account & Continue'}
+                  </span>
                   <ArrowRight size={16} />
                 </button>
               </form>
             )}
-
-            <div className="text-center my-3 position-relative">
-              <hr className="my-2" />
-              <span
-                className={`small px-2 position-absolute top-50 start-50 translate-middle ${
-                  isDark ? 'bg-slate-900 text-muted' : 'bg-white text-muted'
-                }`}
-              >
-                or
-              </span>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleGuestLogin}
-              className={`btn btn-sm w-100 rounded-pill py-2 border fw-medium ${
-                isDark ? 'btn-outline-secondary' : 'btn-outline-dark'
-              }`}
-            >
-              Continue as Guest (1-Click Instant Demo)
-            </button>
           </div>
         </div>
       </div>

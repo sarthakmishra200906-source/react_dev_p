@@ -21,15 +21,59 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dotenv import find_dotenv, load_dotenv
+from pathlib import Path
 
-# Load environment variables (.env)
-load_dotenv(find_dotenv())
+# Load environment variables (.env) from candidate locations
+for candidate in [
+    Path(__file__).resolve().parent.parent / ".env",
+    Path(__file__).resolve().parent.parent.parent / ".env",
+    Path.cwd() / "backend" / ".env",
+    Path.cwd() / ".env",
+    Path(find_dotenv()) if find_dotenv() else None,
+]:
+    if candidate and candidate.exists():
+        load_dotenv(candidate, override=False)
 
 try:
     from pypdf import PdfReader
     HAS_PYPDF = True
 except ImportError:
     HAS_PYPDF = False
+
+
+RESEARCH_SYSTEM_PROMPT = """You are an elite Academic Research Assistant operating in Deep Research Mode.
+The user is requesting a COMPREHENSIVE SYNTHESIS of core theorems, definitions, equations, and principles.
+Do NOT provide study advice, timelines, or generic 5-line/7-line workspace guidance.
+
+Task: Synthesize core theorems, definitions, equations, and foundational principles from the provided context.
+Constraint Checklist:
+1. Strict adherence to source material.
+2. If numerical data or mathematical formulas are available (such as fuel cell efficiency calculations, heat energy enthalpy, reaction free energy, agricultural impact metrics), extract and present the complete equations, numbers, and results.
+3. Format output in rich markdown with clear headings:
+   - ## 1. Executive Research Overview
+   - ## 2. Core Theoretical Foundations & Principles
+   - ## 3. Mathematical & Empirical Formulations (Formulas, Equations & Data)
+   - ## 4. In-Depth Environmental & Practical Synthesis
+   - ## 5. Academic Takeaways & Exam Implications
+4. Cite sources explicitly (e.g., "--- PDF Page N ---" or document section).
+"""
+
+
+def is_research_query(prompt: str) -> bool:
+    """Detects if a query is an academic research, theorem synthesis, or equation extraction request."""
+    if not prompt:
+        return False
+    q = prompt.lower().strip()
+    keywords = [
+        "synthesize", "synthesis", "core theorem", "theorems", "definition", "definitions",
+        "equation", "equations", "formula", "formulas", "deep research",
+        "literature review", "comprehensive analysis", "contrast", "methodology",
+        "scientific", "mathematical", "derivation", "module 2", "module 1", "module 3",
+        "enviromental", "environmental", "fuel cell", "efficiency",
+        "summarize", "sumrise", "summary", "natural resource", "natural resources",
+        "overview", "classification", "degradation", "conservation"
+    ]
+    return any(k in q for k in keywords)
 
 
 class Project1RAG:
@@ -55,11 +99,8 @@ class Project1RAG:
         self.gemini_api_key = raw_key.strip("[]'\"") if raw_key else None
         self.gemini_models = [
             "gemini-3.6-flash",
-            "gemini-3.8-flash",
-            "gemini-3.5-flash",
             "gemini-flash-latest",
-            "gemini-flash-lite-latest",
-            "gemini-pro-latest",
+            "gemini-3.8-flash",
         ]
 
     def run(
@@ -170,6 +211,38 @@ class Project1RAG:
         if extracted_pages:
             return "=== EXTRACTED PDF DOCUMENT CONTENT ===\n" + "\n\n".join(extracted_pages)
         return "=== ATTACHED PDF DOCUMENT ===\n[Attached handwritten notes or scanned document. Multimodal visual document comprehension active.]"
+
+    def chunk_text(self, text: str, chunk_size: int = 800, overlap: int = 100) -> List[str]:
+        """Splits extracted document text cleanly into overlapping chunks for vector embedding."""
+        if not text:
+            return []
+        paragraphs = text.split("\n\n")
+        chunks = []
+        current = []
+        cur_len = 0
+
+        for para in paragraphs:
+            para_clean = para.strip()
+            if not para_clean:
+                continue
+            if cur_len + len(para_clean) > chunk_size and current:
+                chunks.append("\n\n".join(current))
+                current = [para_clean]
+                cur_len = len(para_clean)
+            else:
+                current.append(para_clean)
+                cur_len += len(para_clean)
+
+        if current:
+            chunks.append("\n\n".join(current))
+
+        if not chunks and text.strip():
+            start = 0
+            while start < len(text):
+                chunks.append(text[start : start + chunk_size].strip())
+                start += max(1, chunk_size - overlap)
+
+        return [c for c in chunks if c.strip()]
 
     def _chunk_context(self, text: str, max_chunk_size: int = 400, overlap: int = 60) -> List[str]:
         """
@@ -301,6 +374,17 @@ class Project1RAG:
                 continue
             cleaned_lines.append(item_clean)
 
+        # If model returned paragraphs instead of line breaks, split into sentences
+        if len(cleaned_lines) < target_lines:
+            expanded = []
+            for cl in cleaned_lines:
+                sub_parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", cl) if len(p.strip()) > 15]
+                if len(sub_parts) > 1:
+                    expanded.extend(sub_parts)
+                else:
+                    expanded.append(cl)
+            cleaned_lines = expanded
+
         final_lines = []
         for idx, line in enumerate(cleaned_lines[:target_lines], 1):
             # Ensure line finishes cleanly with a period if not ending with standard punctuation
@@ -340,10 +424,20 @@ class Project1RAG:
            the user's real tasks, notes, and query to generate an intelligent personalized answer.
         """
         context_str = "\n\n---\n\n".join(chunks) if chunks else "No specific documents provided."
+        is_research = is_research_query(raw_prompt) or is_research_query(query)
         target_lines = 5 if is_custom_instruction else 7
         has_pdf = bool(pdf_bytes and len(pdf_bytes) > 0)
 
-        if not is_custom_instruction:
+        if is_research:
+            full_prompt = f"""{RESEARCH_SYSTEM_PROMPT}
+
+=== RETRIEVED STUDY MATERIALS & SOURCE CONTEXT ===
+{context_str}
+
+=== USER RESEARCH INQUIRY ===
+{raw_prompt or query}
+"""
+        elif not is_custom_instruction:
             pdf_guidance = (
                 "Line 3: Comprehensive analysis of the attached handwritten/scanned PDF document: thoroughly read and visually transcribe its key topics, definitions, diagrams, and questions.\n"
                 if has_pdf else
@@ -363,6 +457,7 @@ class Project1RAG:
                 "CRITICAL COMPLETION RULE: Each numbered line MUST be a single, complete, full sentence without being cut in half. Never truncate or wrap lines."
             )
             user_instruction = "Generate the 7-line analysis and task completion guidance now based on the retrieved context and attached document."
+            full_prompt = f"{system_instruction}\n\n=== CONTEXT FROM USER.TXT & DOCUMENTS ===\n{context_str}\n\n=== INSTRUCTION ===\n{user_instruction}"
         else:
             system_instruction = (
                 "You are an expert AI academic assistant analyzing the user's tasks, notes, and documents.\n"
@@ -372,15 +467,7 @@ class Project1RAG:
                 "CRITICAL COMPLETION RULE: Each numbered line MUST be a complete, self-contained sentence without being cut in half. Do NOT include markdown titles, extra blank lines, or preamble."
             )
             user_instruction = f"User Custom Prompt: {raw_prompt}\nAnswer in exactly 5 lines:"
-
-        full_prompt = f"""{system_instruction}
-
-=== CONTEXT FROM USER.TXT & DOCUMENTS ===
-{context_str}
-
-=== INSTRUCTION ===
-{user_instruction}
-"""
+            full_prompt = f"{system_instruction}\n\n=== CONTEXT FROM USER.TXT & DOCUMENTS ===\n{context_str}\n\n=== INSTRUCTION ===\n{user_instruction}"
 
         # --- TIER 1: Cloud AI Fallback Cascade (Gemini Models) ---
         if self.gemini_api_key and self.gemini_api_key != "your_gemini_api_key_here":
@@ -388,25 +475,39 @@ class Project1RAG:
                 try:
                     gemini_res = self._call_gemini_api(model_name, full_prompt, pdf_bytes=pdf_bytes)
                     if gemini_res:
+                        if is_research:
+                            return gemini_res.strip()
                         formatted = self._clean_and_enforce_lines(gemini_res, target_lines)
                         if formatted:
                             return formatted
                 except PermissionError:
-                    break  # Key is invalid, proceed to Ollama without wasting time
-                except Exception:
+                    print(f"[RAG Pipeline] Cloud Gemini unavailable (auth/key error) -> Silently routing to Local Ollama...")
+                    break  # Key is invalid, proceed directly to Ollama without wasting time
+                except Exception as e:
+                    err_str = str(e)
+                    print(f"[Gemini Model {model_name} Error]: {err_str[:120]}")
+                    if "429" in err_str or "quota" in err_str.lower() or "401" in err_str or "key" in err_str.lower() or "invalid" in err_str.lower():
+                        print(f"[RAG Pipeline] Gemini quota/auth limit reached -> Silently routing to Local Ollama...")
+                        break
                     continue  # Failover to the next Gemini model
 
         # --- TIER 2: Local Ollama Model Takes Control ---
         try:
+            print("[RAG Pipeline] Executing Local Ollama Llama 3 inference...")
             ollama_res = self._call_ollama_api(full_prompt)
             if ollama_res:
+                if is_research:
+                    return ollama_res.strip()
                 formatted = self._clean_and_enforce_lines(ollama_res, target_lines)
                 if formatted:
                     return formatted
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Ollama LLM Error]: {e}")
 
         # --- TIER 3: Dynamic Context-Aware Offline Synthesizer ---
+        print("[RAG Pipeline] Falling back to Dynamic Offline Grounded Synthesizer...")
+        if is_research:
+            return self._synthesize_offline_research(context_str, raw_prompt or query)
         return self._synthesize_offline_response(
             context_str=context_str,
             raw_prompt=raw_prompt,
@@ -429,16 +530,60 @@ class Project1RAG:
                     installed = [m.get("name") for m in tags_data.get("models", []) if m.get("name")]
                     if installed:
                         if model_to_use not in installed:
-                            model_to_use = installed[0]
+                            matched = [m for m in installed if m.startswith(model_to_use)]
+                            model_to_use = matched[0] if matched else installed[0]
         except Exception:
             pass
 
         endpoint = f"{self.ollama_base_url}/api/generate"
         payload = {
             "model": model_to_use,
-            "prompt": prompt,
+            "prompt": prompt[:4000],  # Bounded prompt for fast local CPU speed
             "stream": False,
-            "keep_alive": 0,
+            "options": {"temperature": 0.2, "num_predict": 300},
+        }
+
+        try:
+            req = urllib.request.Request(
+                endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=60) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode("utf-8"))
+                    res_text = data.get("response", "").strip()
+                    if res_text:
+                        return res_text
+        except Exception as e:
+            print(f"[Ollama Request Warning]: {e}")
+            return None
+        return None
+
+    def _call_gemini_api(self, model: str, prompt: str, pdf_bytes: Optional[bytes] = None) -> Optional[str]:
+        """Calls Gemini REST API via standard library with timeout protection and multimodal PDF vision support."""
+        clean_model = model.replace("models/", "")
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{clean_model}:generateContent?key={self.gemini_api_key}"
+        parts = []
+        has_pdf = False
+        if pdf_bytes and len(pdf_bytes) > 0 and len(pdf_bytes) < 18 * 1024 * 1024:
+            try:
+                b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+                parts.append({
+                    "inlineData": {
+                        "mimeType": "application/pdf",
+                        "data": b64_pdf,
+                    }
+                })
+                has_pdf = True
+            except Exception:
+                pass
+        parts.append({"text": prompt})
+
+        payload = {
+            "contents": [{"parts": parts}],
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 4096},
         }
 
         try:
@@ -451,58 +596,76 @@ class Project1RAG:
             with urllib.request.urlopen(req, timeout=30) as response:
                 if response.status == 200:
                     data = json.loads(response.read().decode("utf-8"))
-                    res_text = data.get("response", "").strip()
-                    if res_text:
-                        return res_text
-        except Exception:
-            return None
-        return None
-
-    def _call_gemini_api(self, model: str, prompt: str, pdf_bytes: Optional[bytes] = None) -> Optional[str]:
-        """Calls Gemini REST API via standard library with timeout protection and multimodal PDF vision support."""
-        clean_model = model.replace("models/", "")
-        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{clean_model}:generateContent?key={self.gemini_api_key}"
-        parts = []
-        if pdf_bytes and len(pdf_bytes) > 0 and len(pdf_bytes) < 18 * 1024 * 1024:
-            try:
-                b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
-                parts.append({
-                    "inlineData": {
-                        "mimeType": "application/pdf",
-                        "data": b64_pdf,
-                    }
-                })
-            except Exception:
-                pass
-        parts.append({"text": prompt})
-
-        payload = {
-            "contents": [{"parts": parts}],
-            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048},
-        }
-
-        try:
-            req = urllib.request.Request(
-                endpoint,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=25) as response:
-                if response.status == 200:
-                    data = json.loads(response.read().decode("utf-8"))
                     candidates = data.get("candidates", [])
                     if candidates:
                         parts_resp = candidates[0].get("content", {}).get("parts", [])
                         if parts_resp:
                             return parts_resp[0].get("text", "").strip()
         except urllib.error.HTTPError as e:
-            if e.code in (400, 403):
+            err_body = e.read().decode("utf-8", errors="ignore")
+            print(f"[Gemini API HTTP {e.code} on {clean_model}]: {err_body[:200]}")
+            if e.code in (401, 403) and "API_KEY_INVALID" in err_body:
                 raise PermissionError("INVALID_GEMINI_KEY")
+
+            # If 400 occurred with inline PDF data, retry with text-only prompt
+            if e.code == 400 and has_pdf:
+                try:
+                    retry_payload = {
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 4096},
+                    }
+                    retry_req = urllib.request.Request(
+                        endpoint,
+                        data=json.dumps(retry_payload).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(retry_req, timeout=30) as retry_resp:
+                        if retry_resp.status == 200:
+                            data = json.loads(retry_resp.read().decode("utf-8"))
+                            candidates = data.get("candidates", [])
+                            if candidates:
+                                parts_resp = candidates[0].get("content", {}).get("parts", [])
+                                if parts_resp:
+                                    return parts_resp[0].get("text", "").strip()
+                except Exception:
+                    pass
             return None
-        except Exception:
+        except Exception as e:
+            print(f"[Gemini Exception]: {e}")
             return None
         return None
+
+    def _synthesize_offline_research(self, context_str: str, query: str) -> str:
+        """Synthesizes structured academic theorems, definitions, and equations from raw context."""
+        equations = re.findall(r"[^\n]+(?:%|=|kcal|temperature|efficiency|formula|heat|energy|reaction|voltage)[^\n]+", context_str, re.IGNORECASE)
+        theorems = re.findall(r"[^\n]+(?:defined as|refers to|consists of|types of|impact|classification|law|deforestation|erosion|pesticide)[^\n]+", context_str, re.IGNORECASE)
+        pages = re.findall(r"---\s*PDF\s*Page\s*\d+\s*---", context_str)
+
+        eq_items = [eq.strip() for eq in equations if len(eq.strip()) > 10][:8]
+        th_items = [th.strip() for th in theorems if len(th.strip()) > 10][:8]
+
+        eq_block = "\n".join(f"- {eq}" for eq in eq_items) if eq_items else "- Formula/Calculations: Theoretical and practical energy conversion equations."
+        th_block = "\n".join(f"- {th}" for th in th_items) if th_items else "- Core definitions and environmental principles derived from study context."
+        page_ref = pages[0] if pages else "Uploaded Study Module Document"
+
+        return f"""## 1. Executive Research Overview: {query}
+This comprehensive academic synthesis analyzes foundational theorems, empirical formulations, and core domain principles extracted directly from **{page_ref}**.
+
+## 2. Core Theoretical Foundations & Principles
+{th_block}
+
+## 3. Mathematical & Empirical Formulations (Formulas, Equations & Numerical Data)
+{eq_block}
+
+## 4. In-Depth Environmental & Practical Synthesis
+- **System Classification & Behavior**: The source materials categorize distinct operational mechanisms, physical configurations, and performance variations across operating environments.
+- **Empirical Constraints**: Critical performance metrics demonstrate direct sensitivity to reactant source purity, thermal conditions, and catalytic conversion parameters.
+
+## 5. Key Academic Takeaways & Exam Implications
+- **Mathematical Derivation Priority**: Memorize the exact numerical ratios, enthalpy calculations, and theoretical efficiency bounds documented above.
+- **Reference Citation**: Grounded strictly in {page_ref} and primary workspace evidence.
+"""
 
     def _extract_tasks_and_notes(self, text: str) -> Tuple[List[str], List[str]]:
         """Extracts valid non-placeholder tasks and notes from formatted text."""
@@ -517,21 +680,20 @@ class Project1RAG:
             line_str = line.strip()
             if not line_str or line_str in {"---", "--", "-", "==="}:
                 continue
-            if "=== TASKS ===" in line_str:
-                in_tasks = True
-                in_notes = False
-                continue
-            elif "=== NOTES ===" in line_str:
-                in_tasks = False
-                in_notes = True
-                continue
-            elif line_str.startswith("==="):
+            if line_str.startswith(("===", "---", "[Table", "[Diagram", "Resource:", "Source:")):
                 in_tasks = False
                 in_notes = False
+                if "=== TASKS ===" in line_str:
+                    in_tasks = True
+                elif "=== NOTES ===" in line_str:
+                    in_notes = True
                 continue
 
             clean = re.sub(r"^\d+[\.\)\-]\s*", "", line_str).strip()
-            if clean and clean.lower() not in {"none", "null", "empty", "---", "--", "-"}:
+            if clean and clean.lower() not in {"none", "null", "empty", "---", "--", "-", "none logged"}:
+                # Do not treat PDF page markers or document sentences as workspace tasks
+                if any(clean.startswith(p) for p in ["PDF Page", "http", "Page ", "Table "]):
+                    continue
                 if in_tasks:
                     tasks.append(clean)
                 elif in_notes:
@@ -545,54 +707,119 @@ class Project1RAG:
         is_custom_instruction: bool,
     ) -> str:
         """
-        Synthesizes real, dynamic user guidance directly from tasks, notes, and prompts.
+        Synthesizes real, dynamic user guidance directly from document text, vector chunks,
+        tasks, notes, and prompts. Prioritizes uploaded documents over manual workspace boxes.
         Guarantees non-generic, informative responses even when offline.
         """
         tasks_found, notes_found = self._extract_tasks_and_notes(context_str)
+        target_lines = 5 if is_custom_instruction else 7
 
-        # Fallback Rule for Empty / Blank Workspace State:
-        if not tasks_found and not notes_found:
+        # 1. Check for document content (PDF text, vector chunks, study material)
+        doc_has_content = (
+            "=== EXTRACTED PDF DOCUMENT CONTENT ===" in context_str
+            or "=== RETRIEVED VECTOR EVIDENCE ===" in context_str
+            or "--- PDF Page" in context_str
+            or len(context_str.strip()) > 300
+        )
+
+        if doc_has_content or is_custom_instruction:
+            # Look for sentences/paragraphs matching raw_prompt keywords
+            query_clean = (raw_prompt or "natural resources study guide").lower()
+            query_terms = [
+                w for w in re.findall(r"\w+", query_clean)
+                if len(w) > 2 and w not in {"what", "when", "where", "which", "with", "from", "that", "this", "have", "please", "give", "tell"}
+            ]
+            if not query_terms:
+                query_terms = ["resource", "energy", "environment", "system", "management", "study"]
+
+            raw_sentences = re.split(r"(?:\n{2,}|\.\s+|;\s+)", context_str)
+            scored_sentences = []
+            seen_clean = set()
+
+            for s in raw_sentences:
+                clean_s = re.sub(r"\s+", " ", s).strip()
+                # Skip headers, page numbers, and UI noise
+                if len(clean_s) < 25 or len(clean_s) > 280 or clean_s.startswith(("===", "Line ", "http", "[Table", "1.", "2.", "3.")):
+                    continue
+                s_lower = clean_s.lower()
+                # Deduplication key
+                dedup_key = clean_s[:35].lower()
+                if dedup_key in seen_clean:
+                    continue
+
+                score = sum(3 for kw in query_terms if kw in s_lower)
+                # Boost definitions and classifications
+                if any(k in s_lower for k in ["defined as", "refers to", "classified", "types of", "consists of", "conservation", "impact", "degradation", "renewable"]):
+                    score += 2
+                if score > 0:
+                    seen_clean.add(dedup_key)
+                    scored_sentences.append((score, clean_s))
+
+            scored_sentences.sort(key=lambda x: x[0], reverse=True)
+            chosen = [s for _, s in scored_sentences[:target_lines]]
+
+            if len(chosen) >= 2:
+                # If we found at least 2 relevant document sentences, synthesize full response
+                while len(chosen) < target_lines:
+                    extra_tips = [
+                        "Review key subtopics and verify mastery through active recall questions.",
+                        "Focus on high-weightage definitions and examination diagrams for maximum score.",
+                        "Validate comprehensive syllabus coverage against standard module objectives.",
+                    ]
+                    chosen.append(extra_tips[len(chosen) % len(extra_tips)])
+
+                formatted_lines = []
+                for idx, line in enumerate(chosen[:target_lines], 1):
+                    clean_line = re.sub(r"^[0-9]+[\.\)\-]\s*", "", line).strip()
+                    if not clean_line.endswith((".", "!", "?")):
+                        clean_line += "."
+                    formatted_lines.append(f"{idx}. {clean_line}")
+                return "\n".join(formatted_lines)
+
+        # 2. If tasks and notes are present in workspace, synthesize from them
+        if tasks_found or notes_found:
+            task_desc = ", ".join(f"'{t}'" for t in tasks_found) if tasks_found else "No active tasks logged"
+            primary_task = tasks_found[0] if tasks_found else "your primary workspace task"
+            note_desc = "; ".join(notes_found) if notes_found else "No specific operational notes recorded"
+
             if not is_custom_instruction:
                 return (
-                    "1. 🚀 Welcome to your AI Multi-Modal Study & Task Assistant!\n"
-                    "2. 📌 Step 1: Add your active study tasks in the 'Enter your task' section above.\n"
-                    "3. 📝 Step 2: Log key notes, deadlines, or strategies in the 'Enter your note' field.\n"
-                    "4. 📄 Step 3: (Optional) Attach handwritten notes or exam PDFs for multi-modal context.\n"
-                    "5. 💡 Step 4: Click 'Generate AI Report' for a custom study plan based on your context.\n"
-                    "6. ❓ Custom Query Tip: Type a question in the query box to get a focused 5-line answer.\n"
-                    "7. 🎯 Action Tip: Clear your session anytime using the 'Clear' button to start fresh context.\n"
-                    "8. 😜 Quick Tip: \"Gotcha! I see your hands are itching to test things out ('Kuchukundia Budhi' style)—go ahead and add a task above to generate a full report!\""
+                    f"1. Tasks Overview: Active tasks logged: {task_desc}.\n"
+                    f"2. Notes Reference: Recorded guidance: {note_desc}.\n"
+                    f"3. Document Status: Workspace context parsed with {len(tasks_found)} task(s) and {len(notes_found)} note(s).\n"
+                    f"4. Step 1: Prioritize and begin work on '{primary_task}' to establish immediate progress.\n"
+                    f"5. Step 2: Implement your noted strategy ({note_desc}) during execution.\n"
+                    f"6. Step 3: Break the workload into timed study or sprint segments to stay on track.\n"
+                    f"7. Action Tip: Validate key concepts against past exam topics and checklist items before concluding."
                 )
             else:
                 return (
-                    f"1. Query Notice: Workspace has no tasks or notes logged yet to answer '{raw_prompt}'.\n"
-                    "2. Getting Started: Type and save your tasks and notes in the panels above.\n"
-                    "3. Document Support: You can also upload a PDF to extract study material automatically.\n"
-                    "4. Focused Answers: Re-submit your query to receive a tailored 5-line response.\n"
-                    "5. Action: Add at least one task or attach your document to proceed."
+                    f"1. Answer: Regarding '{raw_prompt}', focus directly on your priority task '{primary_task}'.\n"
+                    f"2. Context: Your recorded notes emphasize: {note_desc}.\n"
+                    f"3. Execution: Break down '{primary_task}' into essential exam-focused chapters and high-yield topics.\n"
+                    f"4. Timeline: Allocate dedicated study blocks today to achieve the one-day completion target.\n"
+                    f"5. Verification: Complete self-test questions and check off each subtopic in your workspace notes."
                 )
 
-        task_desc = ", ".join(f"'{t}'" for t in tasks_found) if tasks_found else "No active tasks logged"
-        primary_task = tasks_found[0] if tasks_found else "your primary workspace task"
-        note_desc = "; ".join(notes_found) if notes_found else "No specific operational notes recorded"
-
+        # 3. Fallback only if genuinely empty workspace (0 tasks, 0 notes, 0 documents, and no prompt)
         if not is_custom_instruction:
             return (
-                f"1. Tasks Overview: Active tasks logged: {task_desc}.\n"
-                f"2. Notes Reference: Recorded guidance: {note_desc}.\n"
-                f"3. Document Status: Workspace context parsed with {len(tasks_found)} task(s) and {len(notes_found)} note(s).\n"
-                f"4. Step 1: Prioritize and begin work on '{primary_task}' to establish immediate progress.\n"
-                f"5. Step 2: Implement your noted strategy ({note_desc}) during execution.\n"
-                f"6. Step 3: Break the workload into timed study or sprint segments to stay on track.\n"
-                f"7. Action Tip: Validate key concepts against past exam topics and checklist items before concluding."
+                "1. 🚀 Welcome to your AI Multi-Modal Study & Task Assistant!\n"
+                "2. 📌 Step 1: Add your active study tasks in the 'Enter your task' section above.\n"
+                "3. 📝 Step 2: Log key notes, deadlines, or strategies in the 'Enter your note' field.\n"
+                "4. 📄 Step 3: (Optional) Attach handwritten notes or exam PDFs for multi-modal context.\n"
+                "5. 💡 Step 4: Click 'Generate AI Report' for a custom study plan based on your context.\n"
+                "6. ❓ Custom Query Tip: Type a question in the query box to get a focused 5-line answer.\n"
+                "7. 🎯 Action Tip: Clear your session anytime using the 'Clear' button to start fresh context.\n"
+                "8. 😜 Quick Tip: \"Gotcha! I see your hands are itching to test things out ('Kuchukundia Budhi' style)—go ahead and add a task above to generate a full report!\""
             )
         else:
             return (
-                f"1. Answer: Regarding '{raw_prompt}', focus directly on your priority task '{primary_task}'.\n"
-                f"2. Context: Your recorded notes emphasize: {note_desc}.\n"
-                f"3. Execution: Break down '{primary_task}' into essential exam-focused chapters and high-yield topics.\n"
-                f"4. Timeline: Allocate dedicated study blocks today to achieve the one-day completion target.\n"
-                f"5. Verification: Complete self-test questions and check off each subtopic in your workspace notes."
+                f"1. Query Guidance: Synthesizing core study context for '{raw_prompt}'.\n"
+                "2. Getting Started: Type and save your tasks and notes in the panels above or attach lecture PDFs.\n"
+                "3. Document Support: Upload your syllabus, notes, or textbook chapters to extract study material automatically.\n"
+                "4. Focused Answers: Re-submit your query to receive a tailored 5-line response.\n"
+                "5. Action: Add at least one task or attach your document to proceed."
             )
 
     def generate_flowchart_data(self, context_str: str) -> Dict[str, Any]:
@@ -741,9 +968,20 @@ class Project1RAG:
         """Answers contextual follow-up questions using cached document text & workspace notes."""
         doc_context = cached_pdf_text[:14000] if cached_pdf_text else "No document attached."
         system_instruction = (
-            "You are an expert AI study tutor grounded in the user's workspace documents and notes.\n"
-            "Answer the user's question directly, clearly, and accurately using the provided document context.\n"
-            "Keep the response concise, formatted with clear bullet points or short paragraphs where helpful."
+            "You are StudyAI Platform's intelligent Document Chat & Interactive Workspace Tutor.\n"
+            "You have complete knowledge of this platform and general academic concepts:\n"
+            "1. Platform Modes & Navigation:\n"
+            "   - 'rag' (AI RAG Studio): Dual-engine comparison (Google Gemini Cloud vs Local Meta Llama 3), multi-modal OCR, 7-line study reports.\n"
+            "   - 'study' (Study Mode Dashboard): Complete cognitive suite with Concept Flowcharts, 3D Flip Flashcards, Sprint Tasks, Obsidian Vault Sync & Calendar Schedules.\n"
+            "   - 'research' (Gemini Deep Research): Publication-grade theorem derivations, empirical formulas, and deep literature syntheses.\n"
+            "   - 'resources' (Sources Hub): Central library holding up to 50 PDFs, URLs, and lecture notes with active context toggles.\n"
+            "   - 'tasks' (Task Manager): Priority task and deadline tracking synced to disk.\n"
+            "   - 'notes' (Important Notes): Markdown notes with YAML frontmatter for Obsidian.\n\n"
+            "2. Navigation Instructions:\n"
+            "   - If the user asks to go to, open, navigate to, or see a specific feature or mode (e.g., 'take me to study mode', 'open deep research', 'show me sources', 'go to notes'), explain the tool and append '[NAVIGATE: tab_id]' (where tab_id is rag, study, research, resources, tasks, or notes) at the very end of your response so the app can automatically take them there.\n"
+            "3. General & Academic Questions:\n"
+            "   - If the user asks about the uploaded document, explain it accurately using the Document Context.\n"
+            "   - If the user asks general academic, science, engineering, or study questions, provide helpful, clear, and structured explanations."
         )
 
         full_prompt = (
@@ -760,6 +998,32 @@ class Project1RAG:
             or ""
         )
         self.gemini_api_key = raw_key.strip("[]'\"") if raw_key else None
+
+        # Check offline quick navigation & platform intents
+        low_msg = user_message.lower()
+        if "how many mode" in low_msg or "what mode" in low_msg or "list mode" in low_msg:
+            return (
+                "There are **6 specialized modes** in StudyAI:\n"
+                "1. **AI RAG Studio (`rag`)**: Dual-engine comparison (Gemini Cloud vs Local Llama 3) and 7-line analysis.\n"
+                "2. **Study Mode (`study`)**: All study tools — Concept Flowcharts, 3D Flashcards, Sprint Tasks, Obsidian Sync & Schedules.\n"
+                "3. **Gemini Deep Research (`research`)**: Deep theorem synthesis, definitions, and equations.\n"
+                "4. **Sources Hub (`resources`)**: 50-item library for PDFs, lecture notes, and research links.\n"
+                "5. **Task Manager (`tasks`)**: Sprint management and deadline checklists.\n"
+                "6. **Important Notes (`notes`)**: Obsidian-compatible markdown notes.\n\n"
+                "Tell me where you want to go and I will take you there! [NAVIGATE: study]"
+            )
+        if ("take me to" in low_msg or "open " in low_msg or "go to " in low_msg) and "study" in low_msg:
+            return "Taking you to **Study Mode** right now! Here you can explore interactive Concept Flowcharts, 3D Flip Flashcards, Sprint Tasks, and Obsidian Study Notes. [NAVIGATE: study]"
+        if ("take me to" in low_msg or "open " in low_msg or "go to " in low_msg) and ("research" in low_msg or "deep" in low_msg):
+            return "Taking you to **Gemini Deep Research**! You can synthesize core theorems, definitions, and formulas here. [NAVIGATE: research]"
+        if ("take me to" in low_msg or "open " in low_msg or "go to " in low_msg) and ("resource" in low_msg or "source" in low_msg or "upload" in low_msg):
+            return "Taking you to **Sources Hub**! You can attach and manage up to 50 study materials here. [NAVIGATE: resources]"
+        if ("take me to" in low_msg or "open " in low_msg or "go to " in low_msg) and ("note" in low_msg or "obsidian" in low_msg):
+            return "Taking you to **Important Notes**! All notes sync to your local Obsidian vault. [NAVIGATE: notes]"
+        if ("take me to" in low_msg or "open " in low_msg or "go to " in low_msg) and ("task" in low_msg or "todo" in low_msg or "sprint" in low_msg):
+            return "Taking you to **Task Manager**! Track your study sprints and milestones here. [NAVIGATE: tasks]"
+        if ("take me to" in low_msg or "open " in low_msg or "go to " in low_msg) and ("rag" in low_msg or "studio" in low_msg or "dual" in low_msg):
+            return "Taking you to **AI RAG Studio**! Inspect multi-modal comparisons and 7-line reports here. [NAVIGATE: rag]"
 
         # Try Gemini fast tier
         if self.gemini_api_key and self.gemini_api_key != "your_gemini_api_key_here":
@@ -779,7 +1043,7 @@ class Project1RAG:
         except Exception:
             pass
 
-        return f"Document Assistant: Regarding '{user_message}', focus directly on your synchronized study tasks and review core definitions."
+        return f"Document Assistant: Regarding '{user_message}', you can navigate using the hamburger Features menu or top navbar tabs to access AI RAG Studio, Study Mode, Deep Research, Sources Hub, Tasks, or Notes."
 
     def run_deep_research(self, query: str, resources_context: str) -> str:
         """
@@ -833,19 +1097,7 @@ class Project1RAG:
             pass
 
         # 3. Dynamic Structured Research Fallback
-        return (
-            f"## Comprehensive Research Analysis: {query}\n\n"
-            f"### 1. Executive Overview\n"
-            f"Based on your synthesized study resources and workspace notes, this investigation addresses **{query}**.\n\n"
-            f"### 2. Core Theoretical Foundations & Principles\n"
-            f"- **Foundational Architecture**: Cross-referencing your study modules indicates that relational integrity and normalization form the theoretical core.\n"
-            f"- **Execution Strategy**: Adhere to the prioritized study timeline logged in your workspace to ensure maximum retention.\n\n"
-            f"### 3. Practical Synthesis & Application\n"
-            f"Review standard question patterns, solve benchmark numerical problems, and verify your understanding against the provided flashcards.\n\n"
-            f"### 4. Strategic Recommendations\n"
-            f"1. Break complex theoretical proofs into timed 45-minute active recall blocks.\n"
-            f"2. Validate topic boundaries using the Concept Mind Map."
-        )
+        return self._synthesize_offline_research(resources_context, query)
 
 
 # Backward-compatible alias

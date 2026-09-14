@@ -1,15 +1,17 @@
 import React from 'react';
-import { Sparkles, Brain, BookOpen, Layers, Calendar, ArrowRight, Microscope, Cpu, Search } from 'lucide-react';
+import { Sparkles, Brain, BookOpen, Layers, Calendar, ArrowRight, Microscope, Cpu, Search, CheckCircle, Zap, ShieldCheck } from 'lucide-react';
 import Carsoul from './carsoul';
 
 export default function LandingPage({
   user = null,
+  siteConfig = null,
   onOpenAuth,
   onGetStarted,
   onGoToDashboard,
   onLaunchDemo,
   onOpenDemo,
   onLogin,
+  onRequestAccess,
   isDark = false,
   searchQuery = '',
 }) {
@@ -28,8 +30,7 @@ export default function LandingPage({
       if (onGoToDashboard) onGoToDashboard();
       else if (onGetStarted) onGetStarted();
     } else {
-      if (onLaunchDemo) onLaunchDemo();
-      else if (onOpenDemo) onOpenDemo();
+      if (onOpenAuth) onOpenAuth('login');
     }
   };
 
@@ -38,9 +39,7 @@ export default function LandingPage({
       if (onGoToDashboard) onGoToDashboard();
       else if (onGetStarted) onGetStarted();
     } else {
-      if (onLaunchDemo) onLaunchDemo();
-      else if (onOpenDemo) onOpenDemo();
-      else if (onOpenAuth) onOpenAuth('login');
+      if (onOpenAuth) onOpenAuth('login');
     }
   };
 
@@ -111,14 +110,21 @@ export default function LandingPage({
             }`}
             style={{ maxWidth: '860px', fontWeight: 800 }}
           >
-            Transform Complex Study Materials into <span className={isDark ? 'gradient-accent' : 'text-primary'}>Mastery & Action</span>
+            {siteConfig?.hero_title ? (
+              siteConfig.hero_title
+            ) : (
+              <>
+                Transform Complex Study Materials into <span className={isDark ? 'gradient-accent' : 'text-primary'}>Mastery & Action</span>
+              </>
+            )}
           </h1>
 
           <p
             className={`lead mx-auto mb-5 ${isDark ? 'text-slate-300' : 'text-muted'}`}
             style={{ maxWidth: '720px', fontSize: '1.15rem', lineHeight: '1.7' }}
           >
-            An intelligent academic workspace combining Gemini 3.6/3.8 Flash visual comprehension, local Llama 3 privacy fallback, 50-resource multi-modal library, and interactive active-recall flashcards.
+            {siteConfig?.hero_subtitle ||
+              'An intelligent academic workspace combining Gemini 3.6/3.8 Flash visual comprehension, local Llama 3 privacy fallback, 50-resource multi-modal library, and interactive active-recall flashcards.'}
           </p>
 
           <div className="d-flex justify-content-center gap-3 flex-wrap mb-4">
@@ -143,7 +149,20 @@ export default function LandingPage({
                   : 'btn-outline-dark'
               }`}
             >
-              {user ? 'Open Workspace' : 'Go to Dashboard (Live Demo)'}
+              {user ? 'Open Workspace' : 'Sign In to Workspace'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (onRequestAccess) onRequestAccess();
+              }}
+              className={`btn btn-lg rounded-pill px-4.5 border fw-semibold d-flex align-items-center gap-2 ${
+                isDark
+                  ? 'border-indigo-500/40 text-indigo-300 bg-indigo-950/30 hover:bg-indigo-900/40 shadow-[0_0_15px_rgba(99,102,241,0.2)]'
+                  : 'btn-outline-primary'
+              }`}
+            >
+              <span>Request Access</span>
             </button>
           </div>
         </div>
@@ -202,6 +221,127 @@ export default function LandingPage({
               </div>
             ))
           )}
+        </div>
+      </section>
+
+      {/* 3-Tier Pricing & Quota Plans */}
+      <section className="container py-5" id="pricing">
+        <div className="text-center mb-5">
+          <span className="badge bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded-pill px-3 py-1 mb-2 small fw-semibold">
+            Transparent Quotas & Limits
+          </span>
+          <h2 className={`fw-bold fs-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+            Flexible Study Plans & Resource Storage
+          </h2>
+          <p className={isDark ? 'text-slate-400' : 'text-muted'}>
+            Configured directly by platform administrators for fair use, strict resource isolation, and offline performance.
+          </p>
+        </div>
+
+        <div className="row g-4 justify-content-center">
+          {(siteConfig?.pricing_tiers || [
+            {
+              id: 'tier-free',
+              name: 'Freemium Starter',
+              price: '$0',
+              resource_limit: 10,
+              query_limit: 10,
+              storage_limit_gb: 10,
+              features: ['10 Uploaded PDFs & Resources', '10 Active Flashcards & Quiz Items', '10 Deep AI Summaries / Queries', '10 GB Isolated Local Storage']
+            },
+            {
+              id: 'tier-pro',
+              name: 'Pro Scholar',
+              price: '$9/mo',
+              resource_limit: 50,
+              query_limit: 100,
+              storage_limit_gb: 25,
+              features: ['50 Uploaded Study Resources', '100 Daily Deep AI Queries', '50 Flashcards & Quizzes', '25 GB Isolated Storage', 'Obsidian & Markdown Export']
+            },
+            {
+              id: 'tier-unlimited',
+              name: 'Enterprise Unlimited',
+              price: '$29/mo',
+              resource_limit: 9999,
+              query_limit: 9999,
+              storage_limit_gb: 100,
+              features: ['Infinite Resources & PDFs', 'Unlimited Deep AI Synthesis', 'Full Dual-Engine Fallback', '100 GB Isolated Disk Space', '24/7 Priority Support & Access']
+            }
+          ]).map((tier, idx) => {
+            const isPopular = tier.id === 'tier-pro' || idx === 1;
+            return (
+              <div key={tier.id || idx} className="col-12 col-md-6 col-lg-4">
+                <div
+                  className={`p-4 p-lg-5 rounded-3xl h-100 d-flex flex-column justify-content-between position-relative transition-all ${
+                    isPopular
+                      ? isDark
+                        ? 'bg-gradient-to-b from-indigo-950/60 to-purple-950/40 border-2 border-indigo-500 shadow-[0_15px_40px_rgba(99,102,241,0.3)]'
+                        : 'bg-white border-2 border-primary shadow-xl'
+                      : isDark
+                      ? 'glass-panel border-white/10 text-slate-100'
+                      : 'bg-white border border-slate-200 shadow-sm'
+                  }`}
+                >
+                  {isPopular && (
+                    <div className="position-absolute top-0 start-50 translate-middle">
+                      <span className="badge bg-primary text-white rounded-pill px-3 py-1 fw-bold shadow-sm" style={{ fontSize: '0.72rem' }}>
+                        ⭐ MOST POPULAR
+                      </span>
+                    </div>
+                  )}
+
+                  <div>
+                    <h4 className={`fw-bold mb-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>{tier.name}</h4>
+                    <div className="d-flex align-items-baseline gap-1 my-3">
+                      <span className={`display-5 fw-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{tier.price}</span>
+                      <span className={`small ${isDark ? 'text-slate-400' : 'text-muted'}`}>/ account</span>
+                    </div>
+
+                    <div className="p-2.5 rounded-2xl mb-4 small fw-semibold" style={{ background: isDark ? 'rgba(255,255,255,0.04)' : '#f8fafc', border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #e2e8f0' }}>
+                      <div className="d-flex justify-content-between py-1">
+                        <span className={isDark ? 'text-slate-400' : 'text-muted'}>Storage Limit:</span>
+                        <span className="fw-bold text-primary">{tier.storage_limit_gb} GB</span>
+                      </div>
+                      <div className="d-flex justify-content-between py-1">
+                        <span className={isDark ? 'text-slate-400' : 'text-muted'}>PDF Resources:</span>
+                        <span className="fw-bold">{tier.resource_limit >= 9000 ? 'Unlimited' : `${tier.resource_limit} Files`}</span>
+                      </div>
+                      <div className="d-flex justify-content-between py-1">
+                        <span className={isDark ? 'text-slate-400' : 'text-muted'}>Daily AI Queries:</span>
+                        <span className="fw-bold">{tier.query_limit >= 9000 ? 'Unlimited' : `${tier.query_limit} / day`}</span>
+                      </div>
+                    </div>
+
+                    <ul className="list-unstyled d-flex flex-column gap-2 mb-4">
+                      {tier.features?.map((feat, fIdx) => (
+                        <li key={fIdx} className="d-flex align-items-center gap-2 small">
+                          <CheckCircle size={15} className="text-emerald-400 flex-shrink-0" />
+                          <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>{feat}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onRequestAccess) onRequestAccess();
+                      else handleStart();
+                    }}
+                    className={`btn w-100 rounded-pill py-2.5 fw-semibold transition-all ${
+                      isPopular
+                        ? 'btn-primary shadow-md'
+                        : isDark
+                        ? 'btn-outline-light'
+                        : 'btn-outline-primary'
+                    }`}
+                  >
+                    {tier.price === '$0' ? 'Get Started Free' : 'Request Access'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </section>
 

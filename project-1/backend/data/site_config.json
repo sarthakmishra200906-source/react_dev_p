@@ -1,0 +1,55 @@
+{
+  "live_notice_enabled": true,
+  "live_schedule_text": "Live Daily for 2 Hours (18:00 - 20:00 Local Time)",
+  "live_status": "ONLINE",
+  "domain_url": "https://study.longbrother.org",
+  "notice_message": "\ud83c\udf10 StudyAI Global Node is live for 2 hours daily! Enjoy fast localized AI study assistance.",
+  "hero_title": "Transform Complex Study Materials into Mastery & Action",
+  "hero_subtitle": "Next-generation localized RAG study intelligence with zero cloud data leaks and multi-modal synthesis.",
+  "pricing_tiers": [
+    {
+      "id": "tier-free",
+      "name": "basic",
+      "price": "$10",
+      "resource_limit": 15,
+      "query_limit": 19,
+      "storage_limit_gb": 15,
+      "features": [
+        "10 Uploaded PDFs & Resources",
+        "10 Active Flashcards & Quiz Items",
+        "10 Deep AI Summaries / Queries",
+        "10 GB Isolated Local Storage"
+      ]
+    },
+    {
+      "id": "tier-pro",
+      "name": "Pro Scholar",
+      "price": "$9/mo",
+      "resource_limit": 50,
+      "query_limit": 100,
+      "storage_limit_gb": 25,
+      "features": [
+        "50 Uploaded Study Resources",
+        "100 Daily Deep AI Queries",
+        "50 Flashcards & Quizzes",
+        "25 GB Isolated Storage",
+        "Obsidian & Markdown Export"
+      ]
+    },
+    {
+      "id": "tier-unlimited",
+      "name": "Enterprise Unlimited",
+      "price": "$29/mo",
+      "resource_limit": 9999,
+      "query_limit": 9999,
+      "storage_limit_gb": 100,
+      "features": [
+        "Infinite Resources & PDFs",
+        "Unlimited Deep AI Synthesis",
+        "Full Dual-Engine Fallback",
+        "100 GB Isolated Disk Space",
+        "24/7 Priority Support & Access"
+      ]
+    }
+  ]
+}

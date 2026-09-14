@@ -1,0 +1,42 @@
+{
+  "2409:40e2:10d4:6224:f1d8:77ac:5bb2:107e": {
+    "ip": "2409:40e2:10d4:6224:f1d8:77ac:5bb2:107e",
+    "first_seen": "2026-09-14 14:20",
+    "request_count": 100,
+    "last_endpoint": "/api/resources",
+    "last_seen_ts": 1789381104.708694,
+    "user_email": "sarthaklove71@gmail.com"
+  },
+  "74.125.216.196": {
+    "ip": "74.125.216.196",
+    "first_seen": "2026-09-14 14:21",
+    "request_count": 1,
+    "last_endpoint": "/api/resources",
+    "last_seen_ts": 1789375882.00312,
+    "user_email": "guest"
+  },
+  "testclient": {
+    "ip": "testclient",
+    "first_seen": "2026-09-14 14:50",
+    "request_count": 2,
+    "last_endpoint": "/api/research",
+    "last_seen_ts": 1789377680.0189881,
+    "user_email": "guest"
+  },
+  "127.0.0.1": {
+    "ip": "127.0.0.1",
+    "first_seen": "2026-09-14 14:53",
+    "request_count": 254,
+    "last_endpoint": "/api/resources",
+    "last_seen_ts": 1789388206.3001084,
+    "user_email": "stress_attacker_07@study.longbrother.org"
+  },
+  "2409:40e2:10d4:6224:fd21:8966:6225:b377": {
+    "ip": "2409:40e2:10d4:6224:fd21:8966:6225:b377",
+    "first_seen": "2026-09-14 17:46",
+    "request_count": 42,
+    "last_endpoint": "/api/history",
+    "last_seen_ts": 1789392686.4436772,
+    "user_email": "global_student_10@study.longbrother.org"
+  }
+}

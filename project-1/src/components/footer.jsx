@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Brain, ShieldCheck, Check, Sparkles, Send, Info, X, ExternalLink } from 'lucide-react';
+import { Brain, ShieldCheck, Check, Sparkles, Send, Info, X, ExternalLink, ArrowRight } from 'lucide-react';
 
 export default function Footer({
   isDark = false,
@@ -24,6 +24,7 @@ export default function Footer({
     geminiDeepResearch: {
       title: 'Gemini Deep Research Mode',
       badge: 'Academic Synthesis',
+      tab: 'research',
       about:
         'A comprehensive research reasoning pipeline powered by Google Gemini models designed to produce long-form, rigorous academic literature reviews, paper syntheses, and technical briefs without line-count constraints.',
       credit: 'Credit to Google DeepMind for the Gemini multimodal reasoning API.',
@@ -33,6 +34,7 @@ export default function Footer({
     flowcharts: {
       title: 'Automated Concept Flowcharts & Mind Maps',
       badge: 'Visual Learning',
+      tab: 'study',
       about:
         'A dynamic visual structuring engine that transforms dense textbook chapters and procedural steps into hierarchical Mermaid.js dependency diagrams.',
       credit: 'Credit to the Mermaid.js open-source community for vector diagram rendering.',
@@ -42,6 +44,7 @@ export default function Footer({
     flashcards: {
       title: 'Active Recall 3D Flip Flashcards',
       badge: 'Cognitive Science',
+      tab: 'study',
       about:
         'A spaced-repetition active-recall study system engineered with smooth CSS 3D perspective transforms and cognitive retrieval principles.',
       credit: 'Designed following Hermann Ebbinghaus forgetting curve research and modern CSS 3D transforms.',
@@ -51,6 +54,7 @@ export default function Footer({
     taskManager: {
       title: 'Standard Task & Sprint Manager',
       badge: 'Focus Sprint',
+      tab: 'tasks',
       about:
         'A structured productivity tracker built for academic sprints, deadline management, and assignment milestone planning.',
       credit: 'Inspired by modern Kanban and GTD (Getting Things Done) methodologies.',
@@ -60,6 +64,7 @@ export default function Footer({
     ollama: {
       title: 'Local Ollama & Meta Llama 3',
       badge: 'Local AI Engine',
+      tab: 'rag',
       about:
         'Ollama is an open-source framework that bundles model weights, configurations, and GPU acceleration into an easy local CLI. Llama 3 is Meta AI’s flagship open foundation model, recognized worldwide for its academic reasoning and math capability.',
       credit: 'Credit to Meta AI for the open Llama 3 weights and the Ollama community for the local inference engine.',
@@ -69,6 +74,7 @@ export default function Footer({
     dualFallback: {
       title: 'Dual-Engine Redundancy & Cascading Fallback',
       badge: 'System Reliability',
+      tab: 'rag',
       about:
         'A resilient multi-model pipeline that combines high-throughput cloud vision models with local offline privacy fallback.',
       credit: 'Google DeepMind (Gemini 3.6/3.8 Flash) and Meta AI (Llama 3).',
@@ -78,6 +84,7 @@ export default function Footer({
     resourceLib: {
       title: '50-Item Multi-Resource Hub',
       badge: 'Grounded Context',
+      tab: 'resources',
       about:
         'A comprehensive in-memory and disk-grounded knowledge base supporting lecture PDFs, raw text equations, and external research URLs.',
       credit: 'Built using FastAPI file streams, PyPDF, and vector context slicing.',
@@ -87,6 +94,7 @@ export default function Footer({
     obsidian: {
       title: 'Obsidian Desktop Sync & Markdown Export',
       badge: 'Productivity Tooling',
+      tab: 'study',
       about:
         'Obsidian is a premier personal knowledge management (PKM) application that operates on a local folder of plain text Markdown files.',
       credit: 'Credit to the Obsidian.md team for championing local-first personal knowledge management.',
@@ -96,6 +104,7 @@ export default function Footer({
     privacy: {
       title: 'Zero Telemetry & Local Privacy Guard',
       badge: 'Data Security',
+      tab: 'rag',
       about:
         'A commitment to student data sovereignty where your academic notes, grades, and coursework are never used for third-party model training.',
       credit: 'Local-first architecture inspired by modern privacy research.',
@@ -105,6 +114,7 @@ export default function Footer({
     precision: {
       title: 'Built for Academic Mastery',
       badge: 'Our Mission',
+      tab: 'study',
       about:
         'Engineered to eliminate cognitive overload and help students, researchers, and engineers score maximum marks with minimum stress.',
       credit: 'Built with modern React, FastAPI, Tailwind, and deep agentic pair-programming.',
@@ -365,14 +375,30 @@ export default function Footer({
               </p>
             </div>
 
-            <div className="d-flex justify-content-end">
+            <div className="d-flex justify-content-end gap-2">
               <button
                 type="button"
                 onClick={() => setActiveInfo(null)}
-                className="btn btn-primary rounded-pill px-4 py-2 fw-semibold shadow-sm"
+                className={`btn btn-sm rounded-pill px-3.5 py-2 fw-medium ${
+                  isDark ? 'btn-outline-light' : 'btn-outline-secondary'
+                }`}
               >
-                Got It
+                Close
               </button>
+              {onNavigateTab && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetTab = activeInfo.tab || 'study';
+                    setActiveInfo(null);
+                    onNavigateTab(targetTab);
+                  }}
+                  className="btn btn-sm btn-primary rounded-pill px-4 py-2 fw-semibold shadow-sm d-flex align-items-center gap-1.5"
+                >
+                  <span>Open in Workspace</span>
+                  <ArrowRight size={14} />
+                </button>
+              )}
             </div>
           </div>
         </div>

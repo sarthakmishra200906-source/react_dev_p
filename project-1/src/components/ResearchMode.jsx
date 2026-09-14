@@ -17,16 +17,24 @@ import {
   HelpCircle,
   Clock,
   FolderPlus,
+  RotateCcw,
+  Layers,
+  Folder,
 } from 'lucide-react';
 
 export default function ResearchMode({
   isDark = false,
   accessCode = '',
   resources = [],
+  user = null,
   isGuest = false,
   onRequireAuth,
   onSaveNote,
   onAddResource,
+  onWipeAllData,
+  selectedResourceId = null,
+  onSelectResource,
+  onOpenResources,
 }) {
   const [query, setQuery] = useState('');
   const [researchReport, setResearchReport] = useState(null);
@@ -36,6 +44,23 @@ export default function ResearchMode({
   const [saveStatus, setSaveStatus] = useState(null); // 'saved' | 'note_saved' | 'resource_saved'
   const [selectedReportModal, setSelectedReportModal] = useState(null);
   const [searchFilter, setSearchFilter] = useState('');
+  const [activeResId, setActiveResId] = useState(() => selectedResourceId || resources[0]?.id || null);
+  const [questionSeed, setQuestionSeed] = useState(0);
+
+  // Sync active resource with props and changes
+  useEffect(() => {
+    if (selectedResourceId) {
+      setActiveResId(selectedResourceId);
+    } else if (resources.length > 0 && (!activeResId || !resources.some((r) => r.id === activeResId))) {
+      setActiveResId(resources[0].id);
+    } else if (resources.length === 0) {
+      setActiveResId(null);
+    }
+  }, [selectedResourceId, resources]);
+
+  const activeResource = useMemo(() => {
+    return resources.find((r) => r.id === activeResId) || resources[0] || null;
+  }, [resources, activeResId]);
 
   // Persistent Saved Research Briefs from localStorage
   const [savedReports, setSavedReports] = useState(() => {
@@ -59,30 +84,60 @@ export default function ResearchMode({
     } catch (e) {}
   }, [savedReports]);
 
-  // Dynamic Question Suggestions derived from uploaded resources
+  // Synchronize with external wipe
+  useEffect(() => {
+    if (resources.length === 0 && !localStorage.getItem('study_saved_research')) {
+      setSavedReports([]);
+      setResearchReport(null);
+    }
+  }, [resources]);
+
+  // Dynamic Question Suggestions derived strictly from uploaded resources in Resource Hub
   const dynamicSuggestions = useMemo(() => {
-    const list = [];
-    if (resources && resources.length > 0) {
-      resources.slice(0, 4).forEach((r) => {
-        const title = (r.title || 'Material').replace(/\.[^/.]+$/, '').trim();
-        list.push(`Synthesize core theorems, definitions, and equations from "${title}"`);
-        list.push(`Formulate high-yield exam practice questions based on "${title}"`);
-      });
-      if (resources.length >= 2) {
-        const t1 = (resources[0].title || 'Resource 1').replace(/\.[^/.]+$/, '').trim();
-        const t2 = (resources[1].title || 'Resource 2').replace(/\.[^/.]+$/, '').trim();
-        list.push(`Contrast methodology & core findings between "${t1}" and "${t2}"`);
+    // If NO resources exist in Resource Hub, DO NOT PRE-GENERATE QUESTIONS!
+    if (!resources || resources.length === 0 || !activeResource) {
+      return [];
+    }
+
+    const title = (activeResource.title || 'Resource Material').replace(/\.[^/.]+$/, '').trim();
+
+    const questionSets = [
+      [
+        `Synthesize core theorems, definitions, and equations from "${title}"`,
+        `Explain key classifications, energy systems, and mechanisms in "${title}"`,
+        `Formulate high-yield examination practice questions based on "${title}"`,
+        `Analyze environmental impacts, sustainable conservation, and practical policies in "${title}"`,
+        `Summarize primary objectives, syllabus dependencies, and key formulas in "${title}"`,
+      ],
+      [
+        `Derive all thermodynamic equations, energy bounds, and formulas found in "${title}"`,
+        `Provide a detailed comparative breakdown of models, materials, and categories in "${title}"`,
+        `Synthesize all experimental data, case studies, and real-world examples from "${title}"`,
+        `Extract crucial definitions, terminology, and exam short-notes from "${title}"`,
+        `Evaluate practical trade-offs, efficiencies, and constraints discussed in "${title}"`,
+      ],
+      [
+        `Explain the step-by-step mechanisms and functional workflows detailed in "${title}"`,
+        `Create a structured revision cheat-sheet covering all major topics in "${title}"`,
+        `Critique current technological challenges and future developments highlighted in "${title}"`,
+        `Synthesize historical context, regulatory frameworks, and milestone discoveries in "${title}"`,
+        `Formulate 5 advanced conceptual questions with detailed solutions from "${title}"`,
+      ],
+    ];
+
+    const currentSet = [...questionSets[questionSeed % questionSets.length]];
+
+    // If multiple resources exist, inject a cross-resource analysis question
+    if (resources.length >= 2) {
+      const otherRes = resources.find((r) => r.id !== activeResource.id);
+      if (otherRes) {
+        const otherTitle = (otherRes.title || 'Secondary Material').replace(/\.[^/.]+$/, '').trim();
+        currentSet[4] = `Cross-synthesize findings and methodologies between "${title}" and "${otherTitle}"`;
       }
     }
-    // Fallback standard academic research questions
-    if (list.length < 3) {
-      list.push('Synthesize Transformer Attention Mechanisms and Multi-Head Scaling laws');
-      list.push('Analyze Relational Algebra optimization algorithms and B-Tree indexing');
-      list.push('Conduct a structured literature review on distributed consensus protocols');
-      list.push('Explain Gradient Descent convergence bounds with mathematical derivation');
-    }
-    return list.slice(0, 5);
-  }, [resources]);
+
+    return currentSet;
+  }, [resources, activeResource, questionSeed]);
 
   const handleRunResearch = async (e, customQ = null) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -102,8 +157,27 @@ export default function ResearchMode({
     try {
       const formData = new FormData();
       formData.append('query', targetQ);
+      if (activeResId) {
+        formData.append('selected_resource_ids', JSON.stringify([activeResId]));
+      }
 
       const headers = {};
+      const savedAdminToken = typeof window !== 'undefined' ? localStorage.getItem('study_admin_token') : '';
+      let savedAuthUser = {};
+      try {
+        savedAuthUser = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('study_auth_user') || '{}') : {};
+      } catch (e) {}
+
+      const effectiveToken = user?.token || user?.access_token || savedAdminToken || savedAuthUser?.token || '';
+      const effectiveEmail = user?.email || savedAuthUser?.email || (effectiveToken ? '' : 'demo@study.ai');
+
+      if (effectiveToken) {
+        headers['Authorization'] = `Bearer ${effectiveToken}`;
+        headers['x-user-token'] = effectiveToken;
+      }
+      if (effectiveEmail) {
+        headers['x-user-email'] = effectiveEmail;
+      }
       if (accessCode) {
         headers['x-access-code'] = accessCode;
       }
@@ -132,9 +206,21 @@ export default function ResearchMode({
     }
   };
 
+  const handleGenerateDefaultBrief = () => {
+    if (!activeResource) return;
+    const title = (activeResource.title || 'study resource').replace(/\.[^/.]+$/, '').trim();
+    const defaultQuery = `Synthesize core theorems, definitions, and equations from "${title}"`;
+    setQuery(defaultQuery);
+    handleRunResearch(null, defaultQuery);
+  };
+
   const handleCopy = (text) => {
     if (!text) return;
-    navigator.clipboard.writeText(text);
+    try {
+      if (navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(text);
+      }
+    } catch (e) {}
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -284,31 +370,148 @@ export default function ResearchMode({
       {/* ================= VIEW 1: RESEARCH STUDIO ================= */}
       {activeTab === 'studio' && (
         <div>
+          {/* Active Resource Grounding Bar */}
+          <div className={`p-3 rounded-2xl border mb-3.5 d-flex justify-content-between align-items-center flex-wrap gap-2.5 ${
+            isDark ? 'bg-slate-800/80 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-800'
+          }`}>
+            <div className="d-flex align-items-center gap-2 flex-wrap">
+              <div className="rounded-circle p-1.5 bg-primary/15 text-primary d-flex align-items-center justify-content-center">
+                <Layers size={16} />
+              </div>
+              <span className="small fw-semibold">Active Resource Grounding:</span>
+              {resources.length > 0 ? (
+                <div className="d-flex align-items-center gap-2 flex-wrap">
+                  <select
+                    className={`form-select form-select-sm rounded-pill fw-medium ${
+                      isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300'
+                    }`}
+                    style={{ minWidth: '180px', maxWidth: '320px' }}
+                    value={activeResId || ''}
+                    onChange={(e) => {
+                      const newId = e.target.value;
+                      setActiveResId(newId);
+                      if (onSelectResource) onSelectResource(newId);
+                      setResearchReport(null);
+                    }}
+                  >
+                    {resources.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.title || r.filename || 'Material'} ({r.type})
+                      </option>
+                    ))}
+                  </select>
+                  <span className="badge bg-primary/20 text-primary rounded-pill small px-2.5 py-1">
+                    Grounded Source
+                  </span>
+                </div>
+              ) : (
+                <span className="small text-muted fst-italic">
+                  No resources in Resource Hub yet.
+                </span>
+              )}
+            </div>
+
+            <div className="d-flex align-items-center gap-2">
+              {resources.length > 0 ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleGenerateDefaultBrief}
+                    disabled={loading}
+                    className="btn btn-sm btn-primary rounded-pill px-3 py-1.5 fw-semibold d-flex align-items-center gap-1.5 shadow-sm"
+                    title="Generate research synthesis grounded in this resource"
+                  >
+                    <Sparkles size={14} />
+                    <span>Generate Brief</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGenerateDefaultBrief}
+                    disabled={loading}
+                    className="btn btn-sm btn-outline-secondary rounded-pill px-2.5 py-1.5 fw-medium d-flex align-items-center gap-1"
+                    title="Generate fresh synthesis for the selected resource"
+                  >
+                    <RotateCcw size={13} />
+                    <span>Generate Fresh</span>
+                  </button>
+                </>
+              ) : (
+                onOpenResources && (
+                  <button
+                    type="button"
+                    onClick={onOpenResources}
+                    className="btn btn-sm btn-outline-primary rounded-pill px-3 py-1.5 fw-medium d-flex align-items-center gap-1"
+                  >
+                    <Folder size={14} />
+                    <span>Upload to Resource Hub</span>
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+
           {/* Dynamic Question Suggestions based on Uploaded Resources */}
           <div className="mb-4">
-            <div className="d-flex align-items-center gap-1.5 mb-2 small fw-semibold text-muted">
-              <HelpCircle size={14} className="text-primary" />
-              <span>Suggested Questions Based on Your Uploaded Resources:</span>
-            </div>
-            <div className="d-flex flex-wrap gap-2">
-              {dynamicSuggestions.map((suggestion, index) => (
+            <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+              <div className="d-flex align-items-center gap-1.5 small fw-semibold text-muted">
+                <HelpCircle size={14} className="text-primary" />
+                <span>Suggested Questions Based on Your Uploaded Resources:</span>
+                {activeResource && (
+                  <span className="badge bg-slate-200 text-dark dark:bg-neutral-800 dark:text-slate-200 rounded-pill small px-2 py-0.5 ms-1">
+                    {activeResource.title}
+                  </span>
+                )}
+              </div>
+
+              {resources.length > 0 && (
                 <button
-                  key={index}
                   type="button"
-                  onClick={() => handleRunResearch(null, suggestion)}
-                  className={`btn btn-sm rounded-pill text-start small border transition-all py-1.5 px-3 d-flex align-items-center gap-2 ${
-                    isDark
-                      ? 'border-neutral-800 bg-neutral-900 text-slate-300 hover:bg-neutral-800 hover:text-white'
-                      : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 hover:text-dark'
-                  }`}
-                  title="Click to ask this research question immediately"
+                  onClick={() => setQuestionSeed((s) => s + 1)}
+                  className="btn btn-xs btn-outline-secondary rounded-pill px-2.5 py-1 small d-flex align-items-center gap-1"
+                  title="Generate fresh suggested questions based on this resource"
                 >
-                  <span className="text-primary fw-bold">Q:</span>
-                  <span>{suggestion}</span>
-                  <ChevronRight size={13} className="text-muted ms-auto opacity-75" />
+                  <RotateCcw size={12} />
+                  <span>Generate Fresh Questions</span>
                 </button>
-              ))}
+              )}
             </div>
+
+            {resources.length === 0 ? (
+              <div className={`p-3 rounded-2xl border small text-muted d-flex align-items-center justify-content-between flex-wrap gap-2 ${
+                isDark ? 'bg-slate-800/40 border-slate-700/60' : 'bg-slate-50 border-slate-200'
+              }`}>
+                <span>No suggested questions available. Add a study resource in the Resource Hub to auto-generate targeted inquiry questions.</span>
+                {onOpenResources && (
+                  <button
+                    type="button"
+                    onClick={onOpenResources}
+                    className="btn btn-xs btn-outline-primary rounded-pill px-2.5 py-1"
+                  >
+                    + Upload Resource
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="d-flex flex-wrap gap-2">
+                {dynamicSuggestions.map((suggestion, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => handleRunResearch(null, suggestion)}
+                    className={`btn btn-sm rounded-pill text-start small border transition-all py-1.5 px-3 d-flex align-items-center gap-2 ${
+                      isDark
+                        ? 'border-neutral-800 bg-neutral-900 text-slate-300 hover:bg-neutral-800 hover:text-white'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 hover:text-dark'
+                    }`}
+                    title="Click to ask this research question immediately"
+                  >
+                    <span className="text-primary fw-bold">Q:</span>
+                    <span>{suggestion}</span>
+                    <ChevronRight size={13} className="text-muted ms-auto opacity-75" />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Research Query Bar */}
@@ -317,7 +520,11 @@ export default function ResearchMode({
               <input
                 type="text"
                 className={`form-control ${isDark ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-400' : ''}`}
-                placeholder="Ask a deep research question, request proof derivations, or synthesize cross-chapter relationships..."
+                placeholder={
+                  activeResource
+                    ? `Ask deep research on "${activeResource.title}", request proof derivations, or compare topics...`
+                    : "Ask a deep research question, request proof derivations, or synthesize cross-chapter relationships..."
+                }
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 disabled={loading}
@@ -358,8 +565,8 @@ export default function ResearchMode({
             </div>
           )}
 
-          {/* Active Research Report Output */}
-          {researchReport && (
+          {/* Active Research Report Output OR Clean Empty State */}
+          {researchReport ? (
             <div
               className={`p-4 rounded-2xl border mt-3 ${
                 isDark
@@ -380,6 +587,16 @@ export default function ResearchMode({
 
                 {/* Report Action Buttons */}
                 <div className="d-flex align-items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleGenerateDefaultBrief}
+                    disabled={loading}
+                    className="btn btn-sm btn-outline-primary rounded-pill px-3 py-1.5 fw-medium d-flex align-items-center gap-1.5"
+                    title="Generate fresh synthesis for this topic"
+                  >
+                    <RotateCcw size={13} />
+                    <span>Generate Fresh</span>
+                  </button>
                   <button
                     type="button"
                     onClick={handleSaveToLibrary}
@@ -425,6 +642,46 @@ export default function ResearchMode({
               >
                 {researchReport.research_report}
               </div>
+            </div>
+          ) : !loading && (
+            /* Clean Default Empty State */
+            <div className={`p-4 p-md-5 rounded-2xl border text-center mt-3 ${
+              isDark ? 'bg-slate-800/40 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'
+            }`}>
+              <div className="mx-auto mb-3 rounded-circle p-3 bg-primary/10 text-primary d-inline-flex align-items-center justify-content-center">
+                <Microscope size={32} />
+              </div>
+              <h5 className="fw-bold mb-1">
+                {resources.length > 0
+                  ? `Ready to Synthesize: ${activeResource?.title || 'Resource Material'}`
+                  : 'Resource Hub is Empty'}
+              </h5>
+              <p className="small max-w-lg mx-auto mb-3">
+                {resources.length > 0
+                  ? 'Tap "Generate Brief" or click any suggested question above to synthesize core theorems, definitions, and equations grounded in your selected material.'
+                  : 'Upload a study PDF, lecture notes, or document in the Sources Hub to begin literature syntheses and unlock grounded question suggestions.'}
+              </p>
+              {resources.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={handleGenerateDefaultBrief}
+                  className="btn btn-primary rounded-pill px-4 py-2 fw-semibold d-inline-flex align-items-center gap-2 shadow-sm"
+                >
+                  <Sparkles size={16} />
+                  <span>Generate Research Brief</span>
+                </button>
+              ) : (
+                onOpenResources && (
+                  <button
+                    type="button"
+                    onClick={onOpenResources}
+                    className="btn btn-outline-primary rounded-pill px-4 py-2 fw-semibold d-inline-flex align-items-center gap-2"
+                  >
+                    <Folder size={16} />
+                    <span>Open Sources Hub & Upload PDF</span>
+                  </button>
+                )
+              )}
             </div>
           )}
         </div>

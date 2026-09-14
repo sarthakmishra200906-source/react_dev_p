@@ -15,7 +15,13 @@ import {
   CheckSquare,
   StickyNote,
   ChevronDown,
-  Search
+  Search,
+  Trash2,
+  RotateCcw,
+  GraduationCap,
+  Shield,
+  ShieldCheck,
+  User,
 } from 'lucide-react';
 import Header from './components/header';
 import Footer from './components/footer';
@@ -23,6 +29,8 @@ import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
 import AuthModal from './components/AuthModal';
 import ChatDrawer from './components/ChatDrawer';
+import AccessRequestModal from './components/AccessRequestModal';
+import UserProfileModal from './components/UserProfileModal';
 import './App.css';
 
 export default function App() {
@@ -50,6 +58,20 @@ export default function App() {
   // Current View: always starts on 'landing' on initial load or reload
   const [currentView, setCurrentView] = useState('landing');
 
+  // Site Configuration & Live Notice CMS State
+  const [siteConfig, setSiteConfig] = useState(null);
+
+  useEffect(() => {
+    fetch('/api/site-config')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data) {
+          setSiteConfig(data.config || data);
+        }
+      })
+      .catch((err) => console.warn('Could not load site config:', err));
+  }, []);
+
   // Active feature tab in Dashboard
   const [activeDashboardTab, setActiveDashboardTab] = useState('rag');
 
@@ -75,6 +97,24 @@ export default function App() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authTab, setAuthTab] = useState('login');
 
+  // Access Request Modal & User Profile Modal State
+  const [isAccessRequestOpen, setIsAccessRequestOpen] = useState(false);
+  const [accessPrefill, setAccessPrefill] = useState({ email: '', name: '' });
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+
+  // Security Guard: Prevent unauthenticated or unapproved users from accessing the dashboard
+  useEffect(() => {
+    if (currentView === 'dashboard') {
+      if (!user) {
+        setCurrentView('landing');
+        setIsAuthOpen(true);
+      } else if (!user.is_admin && user.access_status && user.access_status !== 'approved') {
+        setCurrentView('landing');
+        setIsAccessRequestOpen(true);
+      }
+    }
+  }, [currentView, user]);
+
   // Theme Mode with localStorage persistence (Default: white / light)
   const [theme, setTheme] = useState(() => {
     try {
@@ -94,6 +134,25 @@ export default function App() {
     }
   }, [theme, isDark]);
 
+  // Load existing multi-resources from backend into the 50-folder list on boot
+  // Load existing multi-resources from user's isolated storage on boot or account switch
+  useEffect(() => {
+    const headers = {};
+    if (user?.token) headers['Authorization'] = `Bearer ${user.token}`;
+    if (user?.email) headers['x-user-email'] = user.email;
+
+    fetch('/api/resources', { headers })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && Array.isArray(data.resources)) {
+          setResources(data.resources);
+        } else {
+          setResources([]);
+        }
+      })
+      .catch((err) => console.warn('Could not preload resources:', err));
+  }, [user?.email, user?.token]);
+
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light';
     setTheme(nextTheme);
@@ -107,9 +166,29 @@ export default function App() {
   // Auth Handlers
   const handleLoginSuccess = (userData, rememberMe) => {
     setUser(userData);
-    setCurrentView('dashboard');
     setIsAuthOpen(false);
     setMobileMenuOpen(false);
+
+    if (!userData.is_admin && userData.access_status && userData.access_status !== 'approved') {
+      setCurrentView('landing');
+      if (userData.email) {
+        setAccessPrefill({ email: userData.email, name: userData.name || '' });
+      }
+      setIsAccessRequestOpen(true);
+      return;
+    }
+
+    setCurrentView('dashboard');
+
+    // Dual Admin Landing Logic
+    const cleanEmail = (userData?.email || '').toLowerCase().trim();
+    if (cleanEmail === 'sarthakmishra200906@gmail.com') {
+      // Admin 2 defaults to Admin Dashboard view
+      setActiveDashboardTab('admin');
+    } else {
+      // Admin 1 (sarthaklove71@gmail.com) and regular users default to User Dashboard view
+      setActiveDashboardTab('rag');
+    }
 
     try {
       if (rememberMe && typeof window !== 'undefined' && window.localStorage) {
@@ -135,16 +214,14 @@ export default function App() {
     setMobileMenuOpen(false);
   };
 
-  const launchDemoUser = () => {
-    handleLoginSuccess(
-      { name: 'Guest Scholar', email: 'guest@study.ai', role: 'Demo User' },
-      false
-    );
-  };
-
   const navigateToDashboardTab = (tabName) => {
     if (!user) {
-      launchDemoUser();
+      openAuth('login');
+      return;
+    }
+    if (!user.is_admin && user.access_status && user.access_status !== 'approved') {
+      setIsAccessRequestOpen(true);
+      return;
     }
     setActiveDashboardTab(tabName);
     setCurrentView('dashboard');
@@ -186,19 +263,55 @@ export default function App() {
 
   const handleDeleteResource = (resourceId) => {
     setResources((prev) => prev.filter((r) => r.id !== resourceId));
-    // Trigger backend physical disk cleanup
-    fetch(`/api/resources/${resourceId}`, { method: 'DELETE' }).catch((err) =>
+    const headers = {};
+    if (user?.token) headers['Authorization'] = `Bearer ${user.token}`;
+    if (user?.email) headers['x-user-email'] = user.email;
+
+    fetch(`/api/resources/${resourceId}`, { method: 'DELETE', headers }).catch((err) =>
       console.warn('Backend resource delete error:', err)
     );
+  };
+
+  const handleWipeAllUserData = async () => {
+    const confirmed = window.confirm(
+      'Clear your uploaded study documents and workspace resources?\n\nThis will clear only your uploaded materials in Resource Hub, notes, and tasks so you can start fresh. System accounts, admin settings, and active connection tracking will NOT be affected.'
+    );
+    if (!confirmed) return;
+
+    const headers = {};
+    if (user?.token) headers['Authorization'] = `Bearer ${user.token}`;
+    if (user?.email) headers['x-user-email'] = user.email;
+
+    try {
+      await fetch('/api/clear-session', { method: 'POST', headers });
+    } catch (err) {
+      console.warn('Backend clear session error:', err);
+    }
+
+    setNotes([]);
+    setTasks([]);
+    setResources([]);
+    setDashboardSearch('');
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.removeItem('study_notes');
+        localStorage.removeItem('study_tasks');
+        localStorage.removeItem('study_resources');
+        localStorage.removeItem('study_saved_research');
+      }
+    } catch (e) {}
+    alert('Your workspace study resources have been cleared successfully.');
   };
 
   // Dashboard Feature Metadata for indicator & switcher
   const dashboardFeatures = [
     { id: 'rag', label: 'AI RAG Studio', icon: <LayoutDashboard size={15} /> },
+    { id: 'study', label: 'Study Mode', icon: <GraduationCap size={15} /> },
     { id: 'research', label: 'Gemini Research', icon: <Microscope size={15} /> },
     { id: 'resources', label: 'Sources Hub', icon: <Folder size={15} /> },
     { id: 'tasks', label: 'Task Manager', icon: <CheckSquare size={15} /> },
     { id: 'notes', label: 'Important Notes', icon: <StickyNote size={15} /> },
+    ...(user?.role === 'admin' || user?.is_admin ? [{ id: 'admin', label: 'Admin Portal', icon: <ShieldCheck size={15} /> }] : []),
   ];
 
   const currentFeature = dashboardFeatures.find((f) => f.id === activeDashboardTab) || dashboardFeatures[0];
@@ -208,6 +321,9 @@ export default function App() {
     if (!query) return null;
     const q = query.toLowerCase().trim();
     if (!q) return null;
+    if (/study|learn|flashcard|quiz|flowchart|mindmap|mind\s*map|schedule|calendar/i.test(q)) {
+      return 'study';
+    }
     if (/gemini|gemni|deep|deap|research|reserch|synthesis|paper|literature|academic|flash\s*3/i.test(q)) {
       return 'research';
     }
@@ -220,8 +336,11 @@ export default function App() {
     if (/resource|source|file|pdf|doc|upload|hub|library|context/i.test(q)) {
       return 'resources';
     }
-    if (/rag|studio|flowchart|flashcard|quiz|mindmap|mind\s*map|report|diagram/i.test(q)) {
+    if (/rag|studio|report|diagram/i.test(q)) {
       return 'rag';
+    }
+    if (/admin|portal|permission|quota|audit/i.test(q)) {
+      return 'admin';
     }
     return null;
   };
@@ -471,6 +590,23 @@ export default function App() {
                 )}
               </div>
 
+              {/* User Profile Button with Switch to Admin option */}
+              <button
+                type="button"
+                onClick={() => setIsProfileOpen(true)}
+                className={`btn btn-sm rounded-pill px-3 py-1.5 fw-semibold d-flex align-items-center gap-1.5 border shadow-sm ${
+                  user?.role === 'admin' || user?.is_admin
+                    ? 'btn-danger text-white border-danger'
+                    : isDark
+                    ? 'border-indigo-500/40 text-indigo-300 bg-indigo-950/40 hover:bg-indigo-900/50'
+                    : 'btn-outline-primary'
+                }`}
+                title="Open Profile & Admin Mode Switcher"
+              >
+                {user?.role === 'admin' || user?.is_admin ? <ShieldCheck size={14} /> : <User size={14} />}
+                <span>{user?.role === 'admin' || user?.is_admin ? 'Admin' : 'Profile'}</span>
+              </button>
+
               {/* Written "Home" Button */}
               <button
                 type="button"
@@ -483,6 +619,19 @@ export default function App() {
               >
                 Home
               </button>
+
+              {/* Clear Resources Button (Workspace materials only) */}
+              {activeDashboardTab !== 'admin' && (
+                <button
+                  type="button"
+                  onClick={handleWipeAllUserData}
+                  className="btn btn-sm btn-outline-danger rounded-pill px-3 py-1.5 fw-semibold d-flex align-items-center gap-1.5 border shadow-sm"
+                  title="Clear your uploaded study materials, notes, and tasks without logging out or touching admin records"
+                >
+                  <Trash2 size={14} />
+                  <span className="d-none d-md-inline">Clear Resources</span>
+                </button>
+              )}
 
               {/* Written "Logout" Button */}
               <button
@@ -499,14 +648,38 @@ export default function App() {
           ) : (
             /* ================= LANDING PAGE NAVBAR CONTROLS ================= */
             <div className="d-flex align-items-center gap-2">
+              {/* Request Access Button on Landing Page */}
+              <button
+                type="button"
+                onClick={() => setIsAccessRequestOpen(true)}
+                className={`btn btn-sm rounded-pill px-3.5 py-1.5 fw-semibold d-flex align-items-center gap-1.5 border ${
+                  isDark
+                    ? 'border-indigo-500/40 text-indigo-300 bg-indigo-950/40 hover:bg-indigo-900/50'
+                    : 'btn-outline-primary'
+                }`}
+              >
+                <Shield size={14} /> Request Access
+              </button>
+
               {user ? (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-primary rounded-pill px-3.5 py-1.5 fw-semibold d-flex align-items-center gap-1.5 shadow-sm"
-                  onClick={() => setCurrentView('dashboard')}
-                >
-                  <LayoutDashboard size={15} /> Open Workspace
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setIsProfileOpen(true)}
+                    className={`btn btn-sm rounded-pill px-3 py-1.5 fw-semibold d-flex align-items-center gap-1 border ${
+                      user?.role === 'admin' ? 'btn-danger text-white' : isDark ? 'btn-dark border-neutral-700' : 'btn-light border'
+                    }`}
+                  >
+                    <User size={14} /> {user?.role === 'admin' ? 'Admin' : 'Profile'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary rounded-pill px-3.5 py-1.5 fw-semibold d-flex align-items-center gap-1.5 shadow-sm"
+                    onClick={() => setCurrentView('dashboard')}
+                  >
+                    <LayoutDashboard size={15} /> Open Workspace
+                  </button>
+                </>
               ) : (
                 <>
                   <button
@@ -547,52 +720,137 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Main App View Routing */}
-      {currentView === 'landing' ? (
-        <div>
-          <LandingPage
-            user={user}
-            onOpenAuth={openAuth}
-            onGetStarted={() => setCurrentView('dashboard')}
-            onGoToDashboard={() => setCurrentView('dashboard')}
-            onLogin={() => openAuth('login')}
-            onLaunchDemo={launchDemoUser}
-            onOpenDemo={launchDemoUser}
-            isDark={isDark}
-            searchQuery={homeSearch}
-          />
+      {/* Live Server Notice Banner (Below Navbar on Landing Page) */}
+      {siteConfig?.live_notice_enabled && (
+        <div
+          className="w-100 py-2 px-3 border-bottom d-flex align-items-center justify-content-center text-center shadow-sm"
+          style={{
+            background: isDark
+              ? 'linear-gradient(90deg, #1e1b4b 0%, #312e81 50%, #1e1b4b 100%)'
+              : 'linear-gradient(90deg, #e0e7ff 0%, #ede9fe 50%, #e0e7ff 100%)',
+            color: isDark ? '#e0e7ff' : '#312e81',
+            fontSize: '0.86rem',
+            borderBottomColor: isDark ? 'rgba(255,255,255,0.1)' : '#c7d2fe',
+          }}
+        >
+          <div className="container d-flex flex-wrap align-items-center justify-content-center gap-2">
+            <span
+              className="badge bg-danger text-white rounded-pill px-2.5 py-1 text-uppercase fw-bold shadow-sm"
+              style={{ fontSize: '0.70rem', letterSpacing: '0.04em' }}
+            >
+              🔴 {siteConfig.live_status || 'LIVE'}
+            </span>
+            <span className="fw-semibold">
+              {siteConfig.notice_message || 'StudyAI platform will be live for 2 hours everyday!'}
+            </span>
+            <span className="badge bg-primary-subtle text-primary border border-primary-subtle rounded-pill px-2.5 py-0.5 small fw-semibold">
+              ⏱️ Schedule: {siteConfig.live_schedule_text || 'Live Daily for 2 Hours (18:00 - 20:00 Local Time)'}
+            </span>
+            {siteConfig.domain_url && (
+              <span className="small opacity-75">
+                (Public Domain:{' '}
+                <a
+                  href={siteConfig.domain_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="fw-bold text-decoration-underline"
+                  style={{ color: isDark ? '#93c5fd' : '#1d4ed8' }}
+                >
+                  {siteConfig.domain_url.replace(/^https?:\/\//, '')}
+                </a>
+                )
+              </span>
+            )}
+          </div>
         </div>
-      ) : (
-        <main className="container-fluid px-lg-5 my-3 flex-grow-1">
-          <Dashboard
-            user={user}
-            onLogout={handleLogout}
-            onOpenAuth={openAuth}
-            isDark={isDark}
-            tasks={tasks}
-            notes={notes}
-            resources={resources}
-            onSaveNote={handleSaveNote}
-            onSaveTask={handleSaveTask}
-            onDeleteNote={handleDeleteNote}
-            onDeleteTask={handleDeleteTask}
-            onEditNote={handleEditNote}
-            onAddResource={handleAddResource}
-            onDeleteResource={handleDeleteResource}
-            activeTab={activeDashboardTab}
-            onTabChange={setActiveDashboardTab}
-            searchQuery={dashboardSearch}
-          />
-        </main>
       )}
 
+      {/* Main App View Routing */}
+      {/* Main App View Routing - Preserved in DOM to prevent unmounting state loss */}
+      <div style={{ display: currentView === 'landing' ? 'block' : 'none' }}>
+        <LandingPage
+          user={user}
+          siteConfig={siteConfig}
+          onOpenAuth={openAuth}
+          onGetStarted={() => {
+            if (user) {
+              if (!user.is_admin && user.access_status && user.access_status !== 'approved') {
+                setIsAccessRequestOpen(true);
+              } else {
+                setCurrentView('dashboard');
+              }
+            } else {
+              openAuth('register');
+            }
+          }}
+          onGoToDashboard={() => {
+            if (user) {
+              if (!user.is_admin && user.access_status && user.access_status !== 'approved') {
+                setIsAccessRequestOpen(true);
+              } else {
+                setCurrentView('dashboard');
+              }
+            } else {
+              openAuth('login');
+            }
+          }}
+          onLogin={() => openAuth('login')}
+          onRequestAccess={(prefillEmail, prefillName) => {
+            if (prefillEmail) setAccessPrefill({ email: prefillEmail, name: prefillName || '' });
+            setIsAccessRequestOpen(true);
+          }}
+          isDark={isDark}
+          searchQuery={homeSearch}
+        />
+      </div>
+
+      <main
+        className="container-fluid px-lg-5 my-3 flex-grow-1"
+        style={{ display: currentView === 'dashboard' ? 'block' : 'none' }}
+      >
+        <Dashboard
+          user={user}
+          onLogout={handleLogout}
+          onLogoutAdmin={() => {
+            const regularUser = { ...user, role: 'Student Researcher', is_admin: false };
+            setUser(regularUser);
+            try {
+              localStorage.setItem('study_auth_user', JSON.stringify(regularUser));
+              localStorage.removeItem('study_admin_token');
+            } catch (e) {}
+            setActiveDashboardTab('rag');
+          }}
+          onOpenAuth={openAuth}
+          isDark={isDark}
+          tasks={tasks}
+          notes={notes}
+          resources={resources}
+          onSaveNote={handleSaveNote}
+          onSaveTask={handleSaveTask}
+          onDeleteNote={handleDeleteNote}
+          onDeleteTask={handleDeleteTask}
+          onEditNote={handleEditNote}
+          onAddResource={handleAddResource}
+          onDeleteResource={handleDeleteResource}
+          onWipeAllData={handleWipeAllUserData}
+          activeTab={activeDashboardTab}
+          onTabChange={setActiveDashboardTab}
+          searchQuery={dashboardSearch}
+        />
+      </main>
+
       {/* Global Interactive Tutor Chat Drawer */}
-      <ChatDrawer isDark={isDark} />
+      <ChatDrawer
+        isDark={isDark}
+        onNavigateTab={navigateToDashboardTab}
+        activeTab={activeDashboardTab}
+      />
 
       {/* Customized Responsive Footer (Modal Content & Explanations Only) */}
       <Footer
         isDark={isDark}
         onOpenAuth={openAuth}
+        onNavigateTab={navigateToDashboardTab}
       />
 
       {/* Authentication Modal */}
@@ -603,6 +861,45 @@ export default function App() {
         onLogin={handleLoginSuccess}
         isDark={isDark}
         initialTab={authTab}
+        onRequestAccess={(prefillEmail, prefillName) => {
+          if (prefillEmail) setAccessPrefill({ email: prefillEmail, name: prefillName || '' });
+          setIsAccessRequestOpen(true);
+        }}
+      />
+
+      {/* Server Access Request Modal */}
+      <AccessRequestModal
+        isOpen={isAccessRequestOpen}
+        onClose={() => setIsAccessRequestOpen(false)}
+        isDark={isDark}
+        prefillEmail={accessPrefill.email}
+        prefillName={accessPrefill.name}
+        onOpenRegister={() => openAuth('register')}
+      />
+
+      {/* User Profile & Admin Switcher Modal */}
+      <UserProfileModal
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+        user={user}
+        onLogout={handleLogout}
+        isDark={isDark}
+        onSwitchToAdmin={(adminUserData, token) => {
+          const updatedUser = {
+            ...user,
+            ...adminUserData,
+            role: 'admin',
+            is_admin: true,
+            token,
+          };
+          setUser(updatedUser);
+          try {
+            localStorage.setItem('study_auth_user', JSON.stringify(updatedUser));
+            localStorage.setItem('study_admin_token', token);
+          } catch (e) {}
+          setCurrentView('dashboard');
+          setActiveDashboardTab('admin');
+        }}
       />
     </div>
   );

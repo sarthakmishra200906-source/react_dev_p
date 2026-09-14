@@ -1,0 +1,28 @@
+{
+  "requests": [
+    {
+      "id": "req-demo-user-01",
+      "name": "Demo Researcher",
+      "email": "demo@study.ai",
+      "reason": "Official Platform Demo User for Testing Features and Limits",
+      "status": "approved",
+      "is_active": true,
+      "daily_query_limit": 50,
+      "queries_used_today": 0,
+      "can_upload": true,
+      "time_window_enabled": false,
+      "start_hour": 0,
+      "end_hour": 23,
+      "requested_at": "2026-09-14 04:00",
+      "client_ip": "127.0.0.1",
+      "reviewed_by": "sarthaklove71@gmail.com",
+      "reviewed_at": "2026-09-14 04:32",
+      "is_paid": false,
+      "tier": "tier-free",
+      "access_token": "usr-demo-token-studyai-2026"
+    }
+  ],
+  "user_tokens": {
+    "usr-demo-token-studyai-2026": "demo@study.ai"
+  }
+}
